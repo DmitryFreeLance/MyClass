@@ -95,7 +95,7 @@ public class MaxBotService implements ApplicationRunner {
             marker,
             properties.getMax().getLongPollLimit(),
             properties.getMax().getLongPollTimeoutSec(),
-            List.of("message_created", "message_callback")
+            null
         );
 
         JsonNode updates = response.path("updates");
