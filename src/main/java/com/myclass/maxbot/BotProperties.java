@@ -108,6 +108,7 @@ public class BotProperties {
     private int timeoutSec;
     private Long leadStateId;
     private String maxIdAttributeAlias;
+    private String parentNameAttributeAlias;
     private String payLinkBase;
 
     public boolean isEnabled() {
@@ -156,6 +157,14 @@ public class BotProperties {
 
     public void setMaxIdAttributeAlias(String maxIdAttributeAlias) {
       this.maxIdAttributeAlias = maxIdAttributeAlias;
+    }
+
+    public String getParentNameAttributeAlias() {
+      return parentNameAttributeAlias;
+    }
+
+    public void setParentNameAttributeAlias(String parentNameAttributeAlias) {
+      this.parentNameAttributeAlias = parentNameAttributeAlias;
     }
 
     public String getPayLinkBase() {

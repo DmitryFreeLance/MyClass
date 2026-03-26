@@ -24,6 +24,7 @@ bot:
     timeout-sec: ${MOYKLASS_TIMEOUT_SEC:15}
     lead-state-id: ${MOYKLASS_LEAD_STATE_ID:}
     max-id-attribute-alias: ${MOYKLASS_MAX_ID_ATTR_ALIAS:}
+    parent-name-attribute-alias: ${MOYKLASS_PARENT_NAME_ATTR_ALIAS:}
     pay-link-base: ${MOYKLASS_PAY_LINK_BASE:https://pay.tvoyklass.com/key/}
 
 server:

@@ -1,6 +1,7 @@
 package com.myclass.maxbot;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,11 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_MARKER = "max.marker";
   private static final String STATE_ADMIN_DIALOG = "admin.current_dialog_id";
   private static final String STATE_SIGNUP_CHOICE = "signup_choice";
-  private static final String STATE_SIGNUP_PHONE = "signup_phone";
+  private static final String STATE_SIGNUP_PHONE_EXISTING = "signup_phone_existing";
+  private static final String STATE_SIGNUP_CHILD_NAME = "signup_child_name";
+  private static final String STATE_SIGNUP_PARENT_NAME = "signup_parent_name";
+  private static final String STATE_SIGNUP_PHONE_NEW = "signup_phone_new";
+  private static final String STATE_SIGNUP_EMAIL_NEW = "signup_email_new";
 
   private final BotProperties properties;
   private final MaxApiClient maxApiClient;
@@ -32,6 +37,7 @@ public class MaxBotService implements ApplicationRunner {
   private final DialogService dialogService;
   private final MoyKlassClient moyKlassClient;
   private final UserStateRepository userStateRepository;
+  private final ObjectMapper objectMapper;
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
   private volatile boolean running = true;
@@ -45,7 +51,8 @@ public class MaxBotService implements ApplicationRunner {
       DialogRepository dialogRepository,
       DialogService dialogService,
       MoyKlassClient moyKlassClient,
-      UserStateRepository userStateRepository
+      UserStateRepository userStateRepository,
+      ObjectMapper objectMapper
   ) {
     this.properties = properties;
     this.maxApiClient = maxApiClient;
@@ -56,6 +63,7 @@ public class MaxBotService implements ApplicationRunner {
     this.dialogService = dialogService;
     this.moyKlassClient = moyKlassClient;
     this.userStateRepository = userStateRepository;
+    this.objectMapper = objectMapper;
   }
 
   @Override
@@ -204,7 +212,7 @@ public class MaxBotService implements ApplicationRunner {
     }
     if ("signup:existing_no".equals(payload)) {
       userStateRepository.clearState(userId);
-      handleSignup(userId);
+      startSignupChildName(userId);
       return;
     }
 
@@ -213,9 +221,10 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     switch (payload) {
-      case "action:signup" -> handleSignup(userId);
+      case "action:signup" -> promptSignupChoice(userId);
       case "action:passes" -> handleRemainingLessons(userId);
       case "action:invoice" -> handleInvoice(userId);
+      case "action:menu" -> sendWelcome(userId);
       default -> log.debug("Unknown callback payload: {}", payload);
     }
   }
@@ -290,8 +299,24 @@ public class MaxBotService implements ApplicationRunner {
         handleSignupChoice(userId, text);
         return;
       }
-      if (STATE_SIGNUP_PHONE.equals(state.getState())) {
-        handleSignupPhone(userId, text);
+      if (STATE_SIGNUP_PHONE_EXISTING.equals(state.getState())) {
+        handleSignupPhoneExisting(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_CHILD_NAME.equals(state.getState())) {
+        handleSignupChildName(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_PARENT_NAME.equals(state.getState())) {
+        handleSignupParentName(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_PHONE_NEW.equals(state.getState())) {
+        handleSignupPhoneNew(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_EMAIL_NEW.equals(state.getState())) {
+        handleSignupEmailNew(userId, text);
         return;
       }
     }
@@ -332,7 +357,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void handleSignup(long userId) {
-    MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX");
+    MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX", null);
     String response = result.isSuccess()
         ? "Ребенок успешно записан"
         : result.getMessage();
@@ -360,18 +385,18 @@ public class MaxBotService implements ApplicationRunner {
     }
     if (normalized.startsWith("нет") || normalized.contains("нов")) {
       userStateRepository.clearState(userId);
-      handleSignup(userId);
+      startSignupChildName(userId);
       return;
     }
     sendUserMessage(userId, "Ответьте, пожалуйста, \"Да\" или \"Нет\".");
   }
 
   private void startSignupPhoneFlow(long userId) {
-    userStateRepository.setState(userId, STATE_SIGNUP_PHONE, null, Instant.now().toEpochMilli());
+    userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
     sendUserMessage(userId, "Введите номер телефона, который использовали при оплате (только цифры).");
   }
 
-  private void handleSignupPhone(long userId, String text) {
+  private void handleSignupPhoneExisting(long userId, String text) {
     MoyKlassResult result = moyKlassClient.linkByPhone(userId, text);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
@@ -381,11 +406,79 @@ public class MaxBotService implements ApplicationRunner {
     sendUserMessage(userId, result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".");
   }
 
+  private void startSignupChildName(long userId) {
+    userStateRepository.setState(userId, STATE_SIGNUP_CHILD_NAME, "{}", Instant.now().toEpochMilli());
+    sendUserMessage(userId, "Введите ФИО ребенка.");
+  }
+
+  private void handleSignupChildName(long userId, String text) {
+    String childName = safeText(text);
+    if (childName == null) {
+      sendUserMessage(userId, "Пожалуйста, введите ФИО ребенка.");
+      return;
+    }
+    SignupData data = getSignupData(userId);
+    data.childName = childName;
+    saveSignupData(userId, STATE_SIGNUP_PARENT_NAME, data);
+    sendUserMessage(userId, "Введите ФИО родителя.");
+  }
+
+  private void handleSignupParentName(long userId, String text) {
+    String parentName = safeText(text);
+    if (parentName == null) {
+      sendUserMessage(userId, "Пожалуйста, введите ФИО родителя.");
+      return;
+    }
+    SignupData data = getSignupData(userId);
+    data.parentName = parentName;
+    saveSignupData(userId, STATE_SIGNUP_PHONE_NEW, data);
+    sendUserMessage(userId, "Введите номер телефона (только цифры).");
+  }
+
+  private void handleSignupPhoneNew(long userId, String text) {
+    String phone = text == null ? "" : text.trim();
+    if (phone.replaceAll("\\\\D", "").length() < 10) {
+      sendUserMessage(userId, "Не смог распознать номер. Введите номер телефона цифрами.");
+      return;
+    }
+    SignupData data = getSignupData(userId);
+    data.phone = phone;
+    saveSignupData(userId, STATE_SIGNUP_EMAIL_NEW, data);
+    sendUserMessage(userId, "Введите email или напишите \"Пропустить\".");
+  }
+
+  private void handleSignupEmailNew(long userId, String text) {
+    String email = text == null ? "" : text.trim();
+    if (!email.equalsIgnoreCase("пропустить") && !email.equalsIgnoreCase("-") && !email.isBlank()) {
+      if (!email.contains("@") || email.length() < 5) {
+        sendUserMessage(userId, "Некорректный email. Введите email или напишите \"Пропустить\".");
+        return;
+      }
+    } else {
+      email = null;
+    }
+    SignupData data = getSignupData(userId);
+    data.email = email;
+    userStateRepository.clearState(userId);
+    MoyKlassClient.SignupData payload = new MoyKlassClient.SignupData(
+        data.childName, data.parentName, data.phone, data.email
+    );
+    MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX", payload);
+    String response = result.isSuccess()
+        ? "Ребенок успешно записан"
+        : result.getMessage();
+    sendUserMessage(userId, response);
+  }
+
   private void handleRemainingLessons(long userId) {
     MoyKlassResult result = moyKlassClient.getRemainingLessons(userId);
     String response = result.isSuccess()
         ? (result.getData() == null ? result.getMessage() : "Осталось занятий: " + result.getData())
         : result.getMessage();
+    if (!result.isSuccess() && isNoProfileMessage(result.getMessage())) {
+      sendMenuMessage(userId, response);
+      return;
+    }
     sendUserMessage(userId, response);
   }
 
@@ -394,6 +487,10 @@ public class MaxBotService implements ApplicationRunner {
     String response = result.isSuccess()
         ? (result.getData() == null ? result.getMessage() : "Счет сформирован: " + result.getData())
         : result.getMessage();
+    if (!result.isSuccess() && isNoProfileMessage(result.getMessage())) {
+      sendMenuMessage(userId, response);
+      return;
+    }
     sendUserMessage(userId, response);
   }
 
@@ -426,12 +523,74 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
+  private void sendMenuMessage(long userId, String text) {
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", keyboardFactory.menuOnlyAttachments()
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send menu message to user {}: {}", userId, e.getMessage());
+    }
+  }
+
   private long parseLongSafe(String value) {
     try {
       return Long.parseLong(value);
     } catch (Exception e) {
       return -1L;
     }
+  }
+
+  private boolean isNoProfileMessage(String message) {
+    if (message == null) {
+      return false;
+    }
+    return message.toLowerCase().contains("не найден профиль");
+  }
+
+  private String safeText(String text) {
+    if (text == null) {
+      return null;
+    }
+    String value = text.trim();
+    return value.isBlank() ? null : value;
+  }
+
+  private SignupData getSignupData(long userId) {
+    return userStateRepository.getState(userId)
+        .map(state -> parseSignupData(state.getData()))
+        .orElseGet(SignupData::new);
+  }
+
+  private void saveSignupData(long userId, String nextState, SignupData data) {
+    userStateRepository.setState(userId, nextState, toJson(data), Instant.now().toEpochMilli());
+  }
+
+  private SignupData parseSignupData(String json) {
+    if (json == null || json.isBlank()) {
+      return new SignupData();
+    }
+    try {
+      return objectMapper.readValue(json, SignupData.class);
+    } catch (Exception e) {
+      return new SignupData();
+    }
+  }
+
+  private String toJson(SignupData data) {
+    try {
+      return objectMapper.writeValueAsString(data);
+    } catch (Exception e) {
+      return "{}";
+    }
+  }
+
+  private static class SignupData {
+    public String childName;
+    public String parentName;
+    public String phone;
+    public String email;
   }
 
   private void sleepQuietly(long millis) {

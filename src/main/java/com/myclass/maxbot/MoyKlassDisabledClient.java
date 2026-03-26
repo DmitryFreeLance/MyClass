@@ -7,7 +7,7 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   private static final Logger log = LoggerFactory.getLogger(MoyKlassDisabledClient.class);
 
   @Override
-  public MoyKlassResult createLead(long maxUserId, String note) {
+  public MoyKlassResult createLead(long maxUserId, String note, SignupData data) {
     log.warn("MoyKlass integration disabled; createLead skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
   }

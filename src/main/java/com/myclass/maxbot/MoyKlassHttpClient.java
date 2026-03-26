@@ -38,7 +38,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   @Override
-  public MoyKlassResult createLead(long maxUserId, String note) {
+  public MoyKlassResult createLead(long maxUserId, String note, SignupData data) {
     if (config.getToken() == null || config.getToken().isBlank()) {
       return MoyKlassResult.failure("Нет API ключа МойКласс.");
     }
@@ -53,12 +53,22 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return MoyKlassResult.success("Уже записан", String.valueOf(user.getMoyklassUserId()));
     }
 
-    String name = buildName(user, maxUserId);
+    String name = data != null && data.getChildName() != null && !data.getChildName().isBlank()
+        ? data.getChildName()
+        : buildName(user, maxUserId);
     try {
       Map<String, Object> payload = new java.util.LinkedHashMap<>();
       payload.put("name", name);
       if (config.getLeadStateId() != null) {
         payload.put("clientStateId", config.getLeadStateId());
+      }
+      if (data != null) {
+        if (data.getPhone() != null && !data.getPhone().isBlank()) {
+          payload.put("phone", normalizePhone(data.getPhone()));
+        }
+        if (data.getEmail() != null && !data.getEmail().isBlank()) {
+          payload.put("email", data.getEmail().trim());
+        }
       }
       if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
         List<Map<String, Object>> attributes = new ArrayList<>();
@@ -66,6 +76,13 @@ public class MoyKlassHttpClient implements MoyKlassClient {
             "attributeAlias", config.getMaxIdAttributeAlias(),
             "value", String.valueOf(maxUserId)
         ));
+        if (data != null && data.getParentName() != null && !data.getParentName().isBlank()
+            && config.getParentNameAttributeAlias() != null && !config.getParentNameAttributeAlias().isBlank()) {
+          attributes.add(Map.of(
+              "attributeAlias", config.getParentNameAttributeAlias(),
+              "value", data.getParentName()
+          ));
+        }
         payload.put("attributes", attributes);
       }
 

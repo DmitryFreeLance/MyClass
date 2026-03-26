@@ -17,6 +17,16 @@ public class KeyboardFactory {
     ));
   }
 
+  public List<Map<String, Object>> menuOnlyAttachments() {
+    List<List<Map<String, Object>>> rows = new ArrayList<>();
+    rows.add(List.of(button("callback", "🏠 В меню", "action:menu")));
+
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
   public List<Map<String, Object>> closeDialogAttachments(long dialogId) {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
     rows.add(List.of(button("callback", "Завершить диалог", "close_dialog:" + dialogId)));
