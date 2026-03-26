@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:sqlite:${BOT_DB_PATH:/data/bot.db}
+    driver-class-name: org.sqlite.JDBC
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+bot:
+  max:
+    base-url: ${MAX_API_BASE_URL:https://platform-api.max.ru}
+    token: ${MAX_BOT_TOKEN:}
+    admin-user-id: ${MAX_ADMIN_USER_ID:0}
+    long-poll-timeout-sec: ${MAX_LONG_POLL_TIMEOUT_SEC:25}
+    long-poll-limit: ${MAX_LONG_POLL_LIMIT:100}
+  admin:
+    panel-token: ${ADMIN_PANEL_TOKEN:}
+  moyklass:
+    enabled: ${MOYKLASS_ENABLED:false}
+    base-url: ${MOYKLASS_BASE_URL:}
+    token: ${MOYKLASS_TOKEN:}
+    timeout-sec: ${MOYKLASS_TIMEOUT_SEC:15}
+    lead-state-id: ${MOYKLASS_LEAD_STATE_ID:}
+    max-id-attribute-alias: ${MOYKLASS_MAX_ID_ATTR_ALIAS:}
+    pay-link-base: ${MOYKLASS_PAY_LINK_BASE:https://pay.tvoyklass.com/key/}
+
+server:
+  port: ${PORT:8080}

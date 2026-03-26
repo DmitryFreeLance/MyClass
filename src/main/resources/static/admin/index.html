@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MAX Bot Admin</title>
+  <link rel="stylesheet" href="/admin/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>MAX Bot Admin</h1>
+      <p>Панель для управления диалогами и запуском /ask.</p>
+    </header>
+
+    <section class="card">
+      <h2>Доступ</h2>
+      <label class="field">
+        <span>Admin token</span>
+        <input id="token" type="password" placeholder="ADMIN_PANEL_TOKEN" />
+      </label>
+      <button id="saveToken" class="button">Сохранить токен</button>
+    </section>
+
+    <section class="card">
+      <h2>Начать диалог</h2>
+      <label class="field">
+        <span>User ID</span>
+        <input id="userId" type="number" placeholder="123456" />
+      </label>
+      <label class="field">
+        <span>Сообщение (необязательно)</span>
+        <textarea id="message" rows="3" placeholder="Здравствуйте! Давайте уточним детали..."></textarea>
+      </label>
+      <button id="startDialog" class="button">Стартовать</button>
+      <p id="startStatus" class="status"></p>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Активные диалоги</h2>
+        <button id="refreshDialogs" class="button ghost">Обновить</button>
+      </div>
+      <div id="dialogs" class="dialogs"></div>
+    </section>
+  </main>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>
