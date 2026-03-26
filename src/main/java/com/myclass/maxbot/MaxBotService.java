@@ -150,7 +150,12 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     if (senderId == properties.getMax().getAdminUserId()) {
-      handleAdminMessage(text);
+      boolean hasAdminDialog = getActiveAdminDialog().isPresent();
+      if (text.startsWith("/ask") || text.startsWith("/admin") || hasAdminDialog) {
+        handleAdminMessage(text);
+      } else {
+        handleUserMessage(senderId, text);
+      }
     } else {
       handleUserMessage(senderId, text);
     }
@@ -216,6 +221,15 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void handleAdminMessage(String text) {
+    if (text.startsWith("/admin")) {
+      String url = properties.getAdmin().getPanelUrl();
+      if (url == null || url.isBlank()) {
+        url = "http://<ваш-домен>/admin/index.html";
+      }
+      sendAdminMessage("Админ-панель: " + url);
+      return;
+    }
+
     if (text.startsWith("/ask")) {
       String[] parts = text.split("\\s+", 3);
       if (parts.length < 2) {
@@ -251,6 +265,16 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     dialogService.forwardAdminMessage(dialog, text);
+  }
+
+  private Optional<DialogRecord> getActiveAdminDialog() {
+    Optional<Long> currentDialogId = botStateRepository.get(STATE_ADMIN_DIALOG)
+        .map(this::parseLongSafe)
+        .filter(id -> id > 0);
+    if (currentDialogId.isEmpty()) {
+      return Optional.empty();
+    }
+    return dialogRepository.findById(currentDialogId.get()).filter(DialogRecord::isActive);
   }
 
   private void handleUserMessage(long userId, String text) {

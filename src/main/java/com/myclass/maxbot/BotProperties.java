@@ -82,6 +82,7 @@ public class BotProperties {
 
   public static class Admin {
     private String panelToken;
+    private String panelUrl;
 
     public String getPanelToken() {
       return panelToken;
@@ -89,6 +90,14 @@ public class BotProperties {
 
     public void setPanelToken(String panelToken) {
       this.panelToken = panelToken;
+    }
+
+    public String getPanelUrl() {
+      return panelUrl;
+    }
+
+    public void setPanelUrl(String panelUrl) {
+      this.panelUrl = panelUrl;
     }
   }
 

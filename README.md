@@ -15,6 +15,7 @@
 - `MAX_BOT_TOKEN` — токен бота MAX
 - `MAX_ADMIN_USER_ID` — user_id администратора в MAX
 - `ADMIN_PANEL_TOKEN` — токен для доступа к админ‑панели
+- `ADMIN_PANEL_URL` — (необязательно) ссылка на админ‑панель для команды `/admin`
 
 Опциональные:
 - `MAX_API_BASE_URL` — по умолчанию `https://platform-api.max.ru`

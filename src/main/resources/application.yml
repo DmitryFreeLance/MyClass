@@ -16,6 +16,7 @@ bot:
     long-poll-limit: ${MAX_LONG_POLL_LIMIT:100}
   admin:
     panel-token: ${ADMIN_PANEL_TOKEN:}
+    panel-url: ${ADMIN_PANEL_URL:}
   moyklass:
     enabled: ${MOYKLASS_ENABLED:false}
     base-url: ${MOYKLASS_BASE_URL:}
