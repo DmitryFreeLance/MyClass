@@ -35,4 +35,10 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
     log.warn("MoyKlass integration disabled; createInvoice skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
   }
+
+  @Override
+  public MoyKlassResult resolveMaxUserIdByPhone(String phone) {
+    log.warn("MoyKlass integration disabled; resolveMaxUserIdByPhone skipped");
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
 }

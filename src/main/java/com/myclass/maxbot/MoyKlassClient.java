@@ -11,6 +11,8 @@ public interface MoyKlassClient {
 
   MoyKlassResult createInvoice(long maxUserId);
 
+  MoyKlassResult resolveMaxUserIdByPhone(String phone);
+
   class SignupData {
     private final String childName;
     private final String parentName;

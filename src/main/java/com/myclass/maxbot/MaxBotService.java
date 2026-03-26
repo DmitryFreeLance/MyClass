@@ -235,19 +235,32 @@ public class MaxBotService implements ApplicationRunner {
       if (url == null || url.isBlank()) {
         url = "http://<ваш-домен>/admin/index.html";
       }
-      sendAdminMessage("Админ-панель: " + url);
+      sendAdminMessage("Админ-панель: " + url + "\nДля диалога с клиентом: /ask <номер телефона>");
       return;
     }
 
     if (text.startsWith("/ask")) {
       String[] parts = text.split("\\s+", 3);
       if (parts.length < 2) {
-        sendAdminMessage("Формат: /ask <user_id> [сообщение]");
+        sendAdminMessage("Формат: /ask <номер телефона> [сообщение]");
         return;
       }
-      long userId = parseLongSafe(parts[1]);
+      String target = parts[1];
+      String digits = target.replaceAll("\\\\D", "");
+      long userId = -1;
+      if (digits.length() >= 10) {
+        MoyKlassResult lookup = moyKlassClient.resolveMaxUserIdByPhone(digits);
+        if (!lookup.isSuccess()) {
+          sendAdminMessage(lookup.getMessage());
+          return;
+        }
+        userId = parseLongSafe(lookup.getData());
+      } else {
+        userId = parseLongSafe(target);
+      }
+
       if (userId <= 0) {
-        sendAdminMessage("Не смог распознать user_id: " + parts[1]);
+        sendAdminMessage("Не смог распознать номер телефона или user_id: " + parts[1]);
         return;
       }
       String intro = parts.length >= 3 ? parts[2] : "";

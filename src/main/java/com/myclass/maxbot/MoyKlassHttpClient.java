@@ -92,16 +92,19 @@ public class MoyKlassHttpClient implements MoyKlassClient {
             "value", String.valueOf(maxUserId)
         ));
       }
+      String parentField = null;
+      String parentValue = null;
       if (data != null && data.getParentName() != null && !data.getParentName().isBlank()
           && config.getParentNameAttributeAlias() != null && !config.getParentNameAttributeAlias().isBlank()) {
         String parentAlias = config.getParentNameAttributeAlias().trim();
-        String parentField = resolveParentField(parentAlias);
+        parentField = resolveParentField(parentAlias);
+        parentValue = data.getParentName();
         if (parentField != null) {
-          payload.put(parentField, data.getParentName());
+          payload.put(parentField, parentValue);
         } else {
           attributes.add(Map.of(
               "attributeAlias", parentAlias,
-              "value", data.getParentName()
+              "value", parentValue
           ));
         }
       }
@@ -113,6 +116,13 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       long moyklassUserId = response.path("id").asLong(0);
       if (moyklassUserId <= 0) {
         return MoyKlassResult.failure("CRM не вернул ID ученика.");
+      }
+      if (parentField != null && parentValue != null) {
+        try {
+          patchJson("/v1/company/users/" + moyklassUserId, Map.of(parentField, parentValue));
+        } catch (Exception e) {
+          log.warn("Failed to set parent field {} for user {}: {}", parentField, moyklassUserId, e.getMessage());
+        }
       }
       userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
       return MoyKlassResult.success("Lead создан", String.valueOf(moyklassUserId));
@@ -251,6 +261,48 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
   }
 
+  @Override
+  public MoyKlassResult resolveMaxUserIdByPhone(String phone) {
+    if (phone == null || phone.isBlank()) {
+      return MoyKlassResult.failure("Телефон не указан.");
+    }
+    String normalized = normalizePhone(phone);
+    if (normalized == null) {
+      return MoyKlassResult.failure("Не удалось распознать номер телефона.");
+    }
+    String alias = config.getMaxIdAttributeAlias();
+    if (alias == null || alias.isBlank()) {
+      return MoyKlassResult.failure("Не задан alias для max_user_id.");
+    }
+
+    try {
+      String url = "/v1/company/users?phone=" + encode(normalized) + "&limit=2";
+      JsonNode response = getJson(url);
+      JsonNode users = response.path("users");
+      if (!users.isArray() || users.isEmpty()) {
+        return MoyKlassResult.failure("Клиент с таким телефоном не найден.");
+      }
+      if (users.size() > 1) {
+        return MoyKlassResult.failure("Найдено несколько клиентов по этому номеру.");
+      }
+
+      JsonNode userNode = users.get(0);
+      String maxUserIdValue = extractAttributeValue(userNode, alias);
+      if (maxUserIdValue == null || maxUserIdValue.isBlank()) {
+        return MoyKlassResult.failure("У клиента нет max_user_id. Сначала пройдите запись через бота.");
+      }
+      try {
+        long maxUserId = Long.parseLong(maxUserIdValue.trim());
+        return MoyKlassResult.success("MAX user id найден", String.valueOf(maxUserId));
+      } catch (NumberFormatException e) {
+        return MoyKlassResult.failure("В CRM max_user_id заполнен некорректно.");
+      }
+    } catch (Exception e) {
+      log.warn("Failed to resolve max_user_id by phone: {}", e.getMessage());
+      return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
+    }
+  }
+
   private Long resolveMoyklassUserId(long maxUserId) {
     Optional<UserRecord> userOpt = userRepository.findByMaxUserId(maxUserId);
     if (userOpt.isEmpty()) {
@@ -309,6 +361,48 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return normalized;
     }
     return null;
+  }
+
+  private String extractAttributeValue(JsonNode userNode, String alias) {
+    if (userNode == null || alias == null) {
+      return null;
+    }
+    JsonNode attrs = userNode.path("attributes");
+    if (!attrs.isArray()) {
+      return null;
+    }
+    for (JsonNode attr : attrs) {
+      String attrAlias = attr.path("attributeAlias").asText(null);
+      if (attrAlias == null || attrAlias.isBlank()) {
+        attrAlias = attr.path("alias").asText(null);
+      }
+      if (attrAlias != null && matchesAlias(attrAlias, alias)) {
+        String value = attr.path("value").asText(null);
+        if (value == null || value.isBlank()) {
+          value = attr.path("valueText").asText(null);
+        }
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private boolean matchesAlias(String attrAlias, String targetAlias) {
+    if (attrAlias == null || targetAlias == null) {
+      return false;
+    }
+    String a = attrAlias.trim();
+    String t = targetAlias.trim();
+    if (a.equalsIgnoreCase(t)) {
+      return true;
+    }
+    if (t.startsWith("user.") && a.equalsIgnoreCase(t.substring("user.".length()))) {
+      return true;
+    }
+    if (!t.startsWith("user.") && ("user." + t).equalsIgnoreCase(a)) {
+      return true;
+    }
+    return false;
   }
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
