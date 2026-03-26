@@ -64,7 +64,10 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       }
       if (data != null) {
         if (data.getPhone() != null && !data.getPhone().isBlank()) {
-          payload.put("phone", normalizePhone(data.getPhone()));
+          String normalizedPhone = normalizePhone(data.getPhone());
+          if (normalizedPhone != null) {
+            payload.put("phone", normalizedPhone);
+          }
         }
         if (data.getEmail() != null && !data.getEmail().isBlank()) {
           payload.put("email", data.getEmail().trim());
@@ -184,6 +187,22 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     } catch (Exception e) {
       log.warn("Failed to link by phone: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
+    }
+  }
+
+  @Override
+  public MoyKlassResult getProfileInfo(long maxUserId) {
+    Long moyklassUserId = resolveMoyklassUserId(maxUserId);
+    if (moyklassUserId == null) {
+      return MoyKlassResult.failure("Профиль не найден.");
+    }
+    try {
+      JsonNode response = getJson("/v1/company/users/" + moyklassUserId);
+      String phone = response.path("phone").asText("");
+      return MoyKlassResult.success("Профиль найден", phone.isBlank() ? null : phone);
+    } catch (Exception e) {
+      log.warn("Failed to fetch profile info: {}", e.getMessage());
+      return MoyKlassResult.failure("Ошибка при получении профиля.");
     }
   }
 

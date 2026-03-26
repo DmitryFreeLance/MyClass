@@ -25,6 +25,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassResult getProfileInfo(long maxUserId) {
+    log.warn("MoyKlass integration disabled; getProfileInfo skipped for user {}", maxUserId);
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
   public MoyKlassResult createInvoice(long maxUserId) {
     log.warn("MoyKlass integration disabled; createInvoice skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");

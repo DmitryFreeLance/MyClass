@@ -361,10 +361,19 @@ public class MaxBotService implements ApplicationRunner {
     String response = result.isSuccess()
         ? "Ребенок успешно записан"
         : result.getMessage();
-    sendUserMessage(userId, response);
+    sendMenuMessage(userId, response);
   }
 
   private void promptSignupChoice(long userId) {
+    MoyKlassResult profile = moyKlassClient.getProfileInfo(userId);
+    if (profile.isSuccess()) {
+      String phone = profile.getData();
+      String response = (phone != null && !phone.isBlank())
+          ? "Вы уже записаны в нашей школе по номеру телефона: " + phone
+          : "Вы уже записаны в нашей школе.";
+      sendMenuMessage(userId, response);
+      return;
+    }
     userStateRepository.setState(userId, STATE_SIGNUP_CHOICE, null, Instant.now().toEpochMilli());
     String text = "Вы уже занимались в нашей школе?";
     try {
@@ -400,7 +409,7 @@ public class MaxBotService implements ApplicationRunner {
     MoyKlassResult result = moyKlassClient.linkByPhone(userId, text);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
-      sendUserMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
+      sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
     sendUserMessage(userId, result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".");
@@ -436,8 +445,8 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void handleSignupPhoneNew(long userId, String text) {
-    String phone = text == null ? "" : text.trim();
-    if (phone.replaceAll("\\\\D", "").length() < 10) {
+    String phone = text == null ? "" : text.replaceAll("\\\\D", "");
+    if (phone.length() < 10) {
       sendUserMessage(userId, "Не смог распознать номер. Введите номер телефона цифрами.");
       return;
     }
@@ -467,7 +476,7 @@ public class MaxBotService implements ApplicationRunner {
     String response = result.isSuccess()
         ? "Ребенок успешно записан"
         : result.getMessage();
-    sendUserMessage(userId, response);
+    sendMenuMessage(userId, response);
   }
 
   private void handleRemainingLessons(long userId) {
@@ -475,11 +484,7 @@ public class MaxBotService implements ApplicationRunner {
     String response = result.isSuccess()
         ? (result.getData() == null ? result.getMessage() : "Осталось занятий: " + result.getData())
         : result.getMessage();
-    if (!result.isSuccess() && isNoProfileMessage(result.getMessage())) {
-      sendMenuMessage(userId, response);
-      return;
-    }
-    sendUserMessage(userId, response);
+    sendMenuMessage(userId, response);
   }
 
   private void handleInvoice(long userId) {
@@ -487,11 +492,7 @@ public class MaxBotService implements ApplicationRunner {
     String response = result.isSuccess()
         ? (result.getData() == null ? result.getMessage() : "Счет сформирован: " + result.getData())
         : result.getMessage();
-    if (!result.isSuccess() && isNoProfileMessage(result.getMessage())) {
-      sendMenuMessage(userId, response);
-      return;
-    }
-    sendUserMessage(userId, response);
+    sendMenuMessage(userId, response);
   }
 
   private void sendAdminMessage(String text) {

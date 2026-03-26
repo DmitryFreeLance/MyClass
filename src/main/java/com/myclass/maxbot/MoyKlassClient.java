@@ -7,6 +7,8 @@ public interface MoyKlassClient {
 
   MoyKlassResult linkByPhone(long maxUserId, String phone);
 
+  MoyKlassResult getProfileInfo(long maxUserId);
+
   MoyKlassResult createInvoice(long maxUserId);
 
   class SignupData {
