@@ -759,11 +759,10 @@ public class MaxBotService implements ApplicationRunner {
     }
     UserChildRepository.UserChild child = childOpt.get();
     userRepository.setMoyklassUserId(userId, child.getMoyklassUserId());
-
-    MoyKlassResult remaining = moyKlassClient.getRemainingLessons(userId);
-    MoyKlassResult invoice = moyKlassClient.createInvoice(userId);
-    String message = buildChildSummary(child, remaining, invoice);
-    sendMainMenuMessage(userId, message);
+    String name = child.getChildName() == null || child.getChildName().isBlank()
+        ? "Ребенок " + child.getMoyklassUserId()
+        : child.getChildName();
+    sendMainMenuMessage(userId, "Выбран ребенок: " + name);
   }
 
   private void sendSignupMenuMessage(long userId, String text) {
@@ -911,19 +910,6 @@ public class MaxBotService implements ApplicationRunner {
         "text", text,
         "payload", payload
     );
-  }
-
-  private String buildChildSummary(UserChildRepository.UserChild child, MoyKlassResult remaining, MoyKlassResult invoice) {
-    String name = child.getChildName() == null || child.getChildName().isBlank()
-        ? "Ребенок " + child.getMoyklassUserId()
-        : child.getChildName();
-    String remainingText = remaining.isSuccess()
-        ? (remaining.getData() == null ? remaining.getMessage() : "Осталось занятий: " + remaining.getData())
-        : remaining.getMessage();
-    String invoiceText = invoice.isSuccess()
-        ? (invoice.getData() == null ? invoice.getMessage() : "Счет на оплату: " + invoice.getData())
-        : "Счет на оплату: " + invoice.getMessage();
-    return "Выбран ребенок: " + name + "\n" + remainingText + "\n" + invoiceText;
   }
 
   private String safeText(String text) {
