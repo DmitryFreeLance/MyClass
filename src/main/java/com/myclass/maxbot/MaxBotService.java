@@ -129,8 +129,28 @@ public class MaxBotService implements ApplicationRunner {
     switch (updateType) {
       case "message_created" -> handleMessageCreated(update.path("message"));
       case "message_callback" -> handleMessageCallback(update.path("callback"));
+      case "bot_started" -> handleBotStarted(update);
       default -> log.debug("Skipping update type: {}", updateType);
     }
+  }
+
+  private void handleBotStarted(JsonNode update) {
+    JsonNode user = update.path("user");
+    long userId = user.path("user_id").asLong(0);
+    if (userId == 0) {
+      return;
+    }
+    String name = user.path("name").asText("");
+    String username = user.path("username").asText("");
+    String firstName = name;
+    String lastName = null;
+    if (name.contains(" ")) {
+      String[] parts = name.split(" ", 2);
+      firstName = parts[0];
+      lastName = parts[1];
+    }
+    userRepository.upsertUser(userId, firstName, lastName, username, Instant.now().toEpochMilli());
+    sendWelcome(userId);
   }
 
   private void handleMessageCreated(JsonNode message) {
