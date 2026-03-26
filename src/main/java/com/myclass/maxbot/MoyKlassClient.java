@@ -13,6 +13,10 @@ public interface MoyKlassClient {
 
   MoyKlassResult resolveMaxUserIdByPhone(String phone);
 
+  MoyKlassResult resolveMaxUserIdByPhoneAndName(String phone, String childName);
+
+  MoyKlassResult linkByPhoneAndName(long maxUserId, String phone, String childName);
+
   class SignupData {
     private final String childName;
     private final String parentName;

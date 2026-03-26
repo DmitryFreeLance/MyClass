@@ -23,6 +23,7 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_ADMIN_DIALOG = "admin.current_dialog_id";
   private static final String STATE_SIGNUP_CHOICE = "signup_choice";
   private static final String STATE_SIGNUP_PHONE_EXISTING = "signup_phone_existing";
+  private static final String STATE_SIGNUP_NAME_EXISTING = "signup_name_existing";
   private static final String STATE_SIGNUP_CHILD_NAME = "signup_child_name";
   private static final String STATE_SIGNUP_PARENT_NAME = "signup_parent_name";
   private static final String STATE_SIGNUP_PHONE_NEW = "signup_phone_new";
@@ -235,21 +236,28 @@ public class MaxBotService implements ApplicationRunner {
       if (url == null || url.isBlank()) {
         url = "http://<ваш-домен>/admin/index.html";
       }
-      sendAdminMessage("Админ-панель: " + url + "\nДля диалога с клиентом: /ask <номер телефона>");
+      sendAdminMessage("Админ-панель: " + url
+          + "\nДля диалога с клиентом: /ask <номер телефона>"
+          + "\nЕсли найдено несколько клиентов: /ask <номер телефона> <ФИО ребенка>");
       return;
     }
 
     if (text.startsWith("/ask")) {
       String[] parts = text.split("\\s+", 3);
       if (parts.length < 2) {
-        sendAdminMessage("Формат: /ask <номер телефона> [сообщение]");
+        sendAdminMessage("Формат: /ask <номер телефона> [ФИО ребенка]");
         return;
       }
       String target = parts[1];
       String digits = target.replaceAll("\\\\D", "");
       long userId = -1;
       if (digits.length() >= 10) {
-        MoyKlassResult lookup = moyKlassClient.resolveMaxUserIdByPhone(digits);
+        MoyKlassResult lookup;
+        if (parts.length >= 3 && !parts[2].isBlank()) {
+          lookup = moyKlassClient.resolveMaxUserIdByPhoneAndName(digits, parts[2]);
+        } else {
+          lookup = moyKlassClient.resolveMaxUserIdByPhone(digits);
+        }
         if (!lookup.isSuccess()) {
           sendAdminMessage(lookup.getMessage());
           return;
@@ -263,7 +271,7 @@ public class MaxBotService implements ApplicationRunner {
         sendAdminMessage("Не смог распознать номер телефона или user_id: " + parts[1]);
         return;
       }
-      String intro = parts.length >= 3 ? parts[2] : "";
+      String intro = "";
       DialogRecord dialog = dialogService.startDialog(userId, properties.getMax().getAdminUserId(), intro);
       botStateRepository.set(STATE_ADMIN_DIALOG, String.valueOf(dialog.getId()));
       sendAdminMessageWithClose("Диалог начат с пользователем " + userId + ".", dialog.getId());
@@ -314,6 +322,10 @@ public class MaxBotService implements ApplicationRunner {
       }
       if (STATE_SIGNUP_PHONE_EXISTING.equals(state.getState())) {
         handleSignupPhoneExisting(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_NAME_EXISTING.equals(state.getState())) {
+        handleSignupNameExisting(userId, text);
         return;
       }
       if (STATE_SIGNUP_CHILD_NAME.equals(state.getState())) {
@@ -423,12 +435,44 @@ public class MaxBotService implements ApplicationRunner {
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
+    if (containsMultipleClientsMessage(result.getMessage())) {
+      String digits = extractDigits(text);
+      try {
+        String data = objectMapper.writeValueAsString(Map.of("phone", digits));
+        userStateRepository.setState(userId, STATE_SIGNUP_NAME_EXISTING, data, Instant.now().toEpochMilli());
+      } catch (Exception e) {
+        log.warn("Failed to store signup phone for name selection: {}", e.getMessage());
+      }
+      sendUserMessage(userId, "По этому номеру найдено несколько клиентов. Введите ФИО ребенка.");
+      return;
+    }
     String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".";
     if (containsPhoneParseError(result.getMessage())) {
       sendSignupMenuMessage(userId, message);
       return;
     }
     sendMenuMessage(userId, message);
+  }
+
+  private void handleSignupNameExisting(long userId, String text) {
+    String childName = safeText(text);
+    if (childName == null) {
+      sendUserMessage(userId, "Пожалуйста, введите ФИО ребенка.");
+      return;
+    }
+    String phone = extractPhoneFromState(userId);
+    if (phone == null) {
+      userStateRepository.clearState(userId);
+      sendMenuMessage(userId, "Не смог найти номер телефона. Нажмите \"Записаться\" и попробуйте снова.");
+      return;
+    }
+    MoyKlassResult result = moyKlassClient.linkByPhoneAndName(userId, phone, childName);
+    if (result.isSuccess()) {
+      userStateRepository.clearState(userId);
+      sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
+      return;
+    }
+    sendUserMessage(result.getMessage());
   }
 
   private void startSignupChildName(long userId) {
@@ -580,6 +624,36 @@ public class MaxBotService implements ApplicationRunner {
       return false;
     }
     return message.toLowerCase().contains("не удалось распознать номер");
+  }
+
+  private boolean containsMultipleClientsMessage(String message) {
+    if (message == null) {
+      return false;
+    }
+    String normalized = message.toLowerCase();
+    return normalized.contains("несколько клиентов") || normalized.contains("несколько клиентов по этому номеру");
+  }
+
+  private String extractDigits(String value) {
+    if (value == null) {
+      return null;
+    }
+    String digits = value.replaceAll("\\\\D", "");
+    return digits.isBlank() ? null : digits;
+  }
+
+  private String extractPhoneFromState(long userId) {
+    UserStateRepository.UserState state = userStateRepository.getState(userId).orElse(null);
+    if (state == null || state.getData() == null) {
+      return null;
+    }
+    try {
+      JsonNode node = objectMapper.readTree(state.getData());
+      String phone = node.path("phone").asText(null);
+      return phone == null || phone.isBlank() ? null : phone;
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private String formatSignupResponse(MoyKlassResult result) {

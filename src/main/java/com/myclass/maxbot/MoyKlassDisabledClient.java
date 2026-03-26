@@ -41,4 +41,16 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
     log.warn("MoyKlass integration disabled; resolveMaxUserIdByPhone skipped");
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
   }
+
+  @Override
+  public MoyKlassResult resolveMaxUserIdByPhoneAndName(String phone, String childName) {
+    log.warn("MoyKlass integration disabled; resolveMaxUserIdByPhoneAndName skipped");
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
+  public MoyKlassResult linkByPhoneAndName(long maxUserId, String phone, String childName) {
+    log.warn("MoyKlass integration disabled; linkByPhoneAndName skipped");
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
 }

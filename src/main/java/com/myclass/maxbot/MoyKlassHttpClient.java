@@ -177,43 +177,19 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
   @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
-    if (phone == null || phone.isBlank()) {
-      return MoyKlassResult.failure("Телефон не указан.");
-    }
-    String normalized = normalizePhone(phone);
-    if (normalized == null) {
-      return MoyKlassResult.failure("Не удалось распознать номер телефона.");
-    }
-
     try {
-      String url = "/v1/company/users?phone=" + encode(normalized) + "&limit=2";
-      JsonNode response = getJson(url);
-      JsonNode users = response.path("users");
-      if (!users.isArray() || users.isEmpty()) {
+      List<UserCandidate> candidates = findUsersByPhone(phone);
+      if (candidates == null) {
+        return MoyKlassResult.failure("Не удалось распознать номер телефона.");
+      }
+      if (candidates.isEmpty()) {
         return MoyKlassResult.failure("По этому номеру клиент не найден.");
       }
-      if (users.size() > 1) {
-        return MoyKlassResult.failure("Найдено несколько клиентов. Уточните номер телефона.");
+      if (candidates.size() > 1) {
+        return MoyKlassResult.failure("Найдено несколько клиентов по этому номеру. Уточните имя ребенка.");
       }
-
-      JsonNode userNode = users.get(0);
-      long moyklassUserId = userNode.path("id").asLong(0);
-      if (moyklassUserId <= 0) {
-        return MoyKlassResult.failure("Не удалось получить ID клиента.");
-      }
-
-      if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
-        Map<String, Object> patch = Map.of(
-            "attributes", List.of(Map.of(
-                "attributeAlias", config.getMaxIdAttributeAlias(),
-                "value", String.valueOf(maxUserId)
-            ))
-        );
-        patchJson("/v1/company/users/" + moyklassUserId, patch);
-      }
-
-      userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
-      return MoyKlassResult.success("Найдены данные клиента", String.valueOf(moyklassUserId));
+      long moyklassUserId = candidates.get(0).id();
+      return linkToMoyklassUser(maxUserId, moyklassUserId);
     } catch (Exception e) {
       log.warn("Failed to link by phone: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
@@ -266,27 +242,23 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     if (phone == null || phone.isBlank()) {
       return MoyKlassResult.failure("Телефон не указан.");
     }
-    String normalized = normalizePhone(phone);
-    if (normalized == null) {
-      return MoyKlassResult.failure("Не удалось распознать номер телефона.");
-    }
     String alias = config.getMaxIdAttributeAlias();
     if (alias == null || alias.isBlank()) {
       return MoyKlassResult.failure("Не задан alias для max_user_id.");
     }
 
     try {
-      String url = "/v1/company/users?phone=" + encode(normalized) + "&limit=2";
-      JsonNode response = getJson(url);
-      JsonNode users = response.path("users");
-      if (!users.isArray() || users.isEmpty()) {
+      List<UserCandidate> candidates = findUsersByPhone(phone);
+      if (candidates == null) {
+        return MoyKlassResult.failure("Не удалось распознать номер телефона.");
+      }
+      if (candidates.isEmpty()) {
         return MoyKlassResult.failure("Клиент с таким телефоном не найден.");
       }
-      if (users.size() > 1) {
+      if (candidates.size() > 1) {
         return MoyKlassResult.failure("Найдено несколько клиентов по этому номеру.");
       }
-
-      JsonNode userNode = users.get(0);
+      JsonNode userNode = candidates.get(0).node();
       String maxUserIdValue = extractAttributeValue(userNode, alias);
       if (maxUserIdValue == null || maxUserIdValue.isBlank()) {
         return MoyKlassResult.failure("У клиента нет max_user_id. Сначала пройдите запись через бота.");
@@ -299,6 +271,75 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       }
     } catch (Exception e) {
       log.warn("Failed to resolve max_user_id by phone: {}", e.getMessage());
+      return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
+    }
+  }
+
+  @Override
+  public MoyKlassResult resolveMaxUserIdByPhoneAndName(String phone, String childName) {
+    if (childName == null || childName.isBlank()) {
+      return MoyKlassResult.failure("Имя ребенка не указано.");
+    }
+    String alias = config.getMaxIdAttributeAlias();
+    if (alias == null || alias.isBlank()) {
+      return MoyKlassResult.failure("Не задан alias для max_user_id.");
+    }
+    try {
+      List<UserCandidate> candidates = findUsersByPhone(phone);
+      if (candidates == null) {
+        return MoyKlassResult.failure("Не удалось распознать номер телефона.");
+      }
+      if (candidates.isEmpty()) {
+        return MoyKlassResult.failure("Клиент с таким телефоном не найден.");
+      }
+      List<UserCandidate> matched = filterByName(candidates, childName);
+      if (matched.isEmpty()) {
+        return MoyKlassResult.failure("Клиент с таким именем не найден. Уточните ФИО ребенка.");
+      }
+      if (matched.size() > 1) {
+        return MoyKlassResult.failure("Найдено несколько клиентов с таким именем. Уточните ФИО ребенка полностью.");
+      }
+      JsonNode userNode = matched.get(0).node();
+      String maxUserIdValue = extractAttributeValue(userNode, alias);
+      if (maxUserIdValue == null || maxUserIdValue.isBlank()) {
+        return MoyKlassResult.failure("У клиента нет max_user_id. Сначала пройдите запись через бота.");
+      }
+      try {
+        long maxUserId = Long.parseLong(maxUserIdValue.trim());
+        return MoyKlassResult.success("MAX user id найден", String.valueOf(maxUserId));
+      } catch (NumberFormatException e) {
+        return MoyKlassResult.failure("В CRM max_user_id заполнен некорректно.");
+      }
+    } catch (Exception e) {
+      log.warn("Failed to resolve max_user_id by phone and name: {}", e.getMessage());
+      return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
+    }
+  }
+
+  @Override
+  public MoyKlassResult linkByPhoneAndName(long maxUserId, String phone, String childName) {
+    if (childName == null || childName.isBlank()) {
+      return MoyKlassResult.failure("Имя ребенка не указано.");
+    }
+    try {
+      List<UserCandidate> candidates = findUsersByPhone(phone);
+      if (candidates == null) {
+        return MoyKlassResult.failure("Не удалось распознать номер телефона.");
+      }
+      if (candidates.isEmpty()) {
+        return MoyKlassResult.failure("По этому номеру клиент не найден.");
+      }
+      List<UserCandidate> matched = filterByName(candidates, childName);
+      if (matched.isEmpty()) {
+        return MoyKlassResult.failure("Клиент с таким именем не найден. Уточните ФИО ребенка.");
+      }
+      if (matched.size() > 1) {
+        return MoyKlassResult.failure("Найдено несколько клиентов с таким именем. Уточните ФИО ребенка полностью.");
+      }
+      long moyklassUserId = matched.get(0).id();
+      return linkToMoyklassUser(maxUserId, moyklassUserId);
+    } catch (Exception e) {
+      log.warn("Failed to link by phone and name: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
     }
   }
@@ -404,6 +445,105 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
     return false;
   }
+
+  private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
+    if (phone == null || phone.isBlank()) {
+      return null;
+    }
+    List<String> variants = normalizePhoneVariants(phone);
+    if (variants.isEmpty()) {
+      return null;
+    }
+
+    for (String variant : variants) {
+      String url = "/v1/company/users?phone=" + encode(variant) + "&limit=50";
+      JsonNode response = getJson(url);
+      JsonNode users = response.path("users");
+      if (users.isArray() && users.size() > 0) {
+        return collectUsers(users);
+      }
+    }
+    return List.of();
+  }
+
+  private List<UserCandidate> collectUsers(JsonNode users) {
+    if (!users.isArray()) {
+      return List.of();
+    }
+    List<UserCandidate> result = new ArrayList<>();
+    for (JsonNode userNode : users) {
+      long id = userNode.path("id").asLong(0);
+      if (id <= 0) {
+        continue;
+      }
+      String name = userNode.path("name").asText("");
+      result.add(new UserCandidate(id, name, userNode));
+    }
+    return result;
+  }
+
+  private List<UserCandidate> filterByName(List<UserCandidate> candidates, String childName) {
+    String needle = normalizeName(childName);
+    if (needle == null) {
+      return List.of();
+    }
+    List<UserCandidate> result = new ArrayList<>();
+    for (UserCandidate candidate : candidates) {
+      String name = normalizeName(candidate.name());
+      if (name != null && name.contains(needle)) {
+        result.add(candidate);
+      }
+    }
+    return result;
+  }
+
+  private String normalizeName(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isBlank() ? null : trimmed.toLowerCase();
+  }
+
+  private List<String> normalizePhoneVariants(String phone) {
+    String digits = phone.replaceAll("\\\\D", "");
+    if (digits.length() < 10 || digits.length() > 15) {
+      return List.of();
+    }
+    List<String> variants = new ArrayList<>();
+    if (digits.length() == 11 && (digits.startsWith("7") || digits.startsWith("8"))) {
+      String national = digits.substring(1);
+      variants.add("7" + national);
+      variants.add("8" + national);
+      variants.add(national);
+    } else if (digits.length() == 10) {
+      variants.add(digits);
+      variants.add("7" + digits);
+      variants.add("8" + digits);
+    } else {
+      variants.add(digits);
+    }
+    return variants.stream().distinct().toList();
+  }
+
+  private MoyKlassResult linkToMoyklassUser(long maxUserId, long moyklassUserId) throws IOException, InterruptedException {
+    if (moyklassUserId <= 0) {
+      return MoyKlassResult.failure("Не удалось получить ID клиента.");
+    }
+    if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
+      Map<String, Object> patch = Map.of(
+          "attributes", List.of(Map.of(
+              "attributeAlias", config.getMaxIdAttributeAlias(),
+              "value", String.valueOf(maxUserId)
+          ))
+      );
+      patchJson("/v1/company/users/" + moyklassUserId, patch);
+    }
+    userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
+    return MoyKlassResult.success("Найдены данные клиента", String.valueOf(moyklassUserId));
+  }
+
+  private record UserCandidate(long id, String name, JsonNode node) {}
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
     return sendRequest("GET", path, null);
