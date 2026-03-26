@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,11 +50,13 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
 
     UserRecord user = userOpt.get();
+    long moyklassUserId = 0;
+    boolean created = false;
     if (user.getMoyklassUserId() != null) {
       long existingId = user.getMoyklassUserId();
       try {
         getJson("/v1/company/users/" + existingId);
-        return MoyKlassResult.success("Уже записан", String.valueOf(existingId));
+        moyklassUserId = existingId;
       } catch (Exception e) {
         String message = e.getMessage() == null ? "" : e.getMessage();
         if (message.contains("404")) {
@@ -69,63 +72,63 @@ public class MoyKlassHttpClient implements MoyKlassClient {
         ? data.getChildName()
         : buildName(user, maxUserId);
     try {
-      Map<String, Object> payload = new java.util.LinkedHashMap<>();
-      payload.put("name", name);
-      if (config.getLeadStateId() != null) {
-        payload.put("clientStateId", config.getLeadStateId());
-      }
-      if (data != null) {
-        if (data.getPhone() != null && !data.getPhone().isBlank()) {
-          String normalizedPhone = normalizePhone(data.getPhone());
-          if (normalizedPhone != null) {
-            payload.put("phone", normalizedPhone);
+      if (moyklassUserId <= 0) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("name", name);
+        if (config.getLeadStateId() != null) {
+          payload.put("clientStateId", config.getLeadStateId());
+        }
+        if (data != null) {
+          if (data.getPhone() != null && !data.getPhone().isBlank()) {
+            String normalizedPhone = normalizePhone(data.getPhone());
+            if (normalizedPhone != null) {
+              payload.put("phone", normalizedPhone);
+            }
+          }
+          if (data.getEmail() != null && !data.getEmail().isBlank()) {
+            payload.put("email", data.getEmail().trim());
+          }
+          if (data.getFilialId() != null && data.getFilialId() > 0) {
+            payload.put("filials", List.of(data.getFilialId()));
           }
         }
-        if (data.getEmail() != null && !data.getEmail().isBlank()) {
-          payload.put("email", data.getEmail().trim());
-        }
-      }
-      List<Map<String, Object>> attributes = new ArrayList<>();
-      if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
-        attributes.add(Map.of(
-            "attributeAlias", config.getMaxIdAttributeAlias().trim(),
-            "value", String.valueOf(maxUserId)
-        ));
-      }
-      String parentField = null;
-      String parentValue = null;
-      if (data != null && data.getParentName() != null && !data.getParentName().isBlank()
-          && config.getParentNameAttributeAlias() != null && !config.getParentNameAttributeAlias().isBlank()) {
-        String parentAlias = config.getParentNameAttributeAlias().trim();
-        parentField = resolveParentField(parentAlias);
-        parentValue = data.getParentName();
-        if (parentField != null) {
-          payload.put(parentField, parentValue);
-        } else {
+        List<Map<String, Object>> attributes = new ArrayList<>();
+        if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
           attributes.add(Map.of(
-              "attributeAlias", parentAlias,
-              "value", parentValue
+              "attributeAlias", config.getMaxIdAttributeAlias().trim(),
+              "value", String.valueOf(maxUserId)
           ));
         }
-      }
-      if (!attributes.isEmpty()) {
-        payload.put("attributes", attributes);
+        if (!attributes.isEmpty()) {
+          payload.put("attributes", attributes);
+        }
+
+        JsonNode response = postJson("/v1/company/users", payload);
+        moyklassUserId = response.path("id").asLong(0);
+        if (moyklassUserId <= 0) {
+          return MoyKlassResult.failure("CRM не вернул ID ученика.");
+        }
+        userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
+        created = true;
       }
 
-      JsonNode response = postJson("/v1/company/users", payload);
-      long moyklassUserId = response.path("id").asLong(0);
-      if (moyklassUserId <= 0) {
-        return MoyKlassResult.failure("CRM не вернул ID ученика.");
-      }
-      if (parentField != null && parentValue != null) {
+      if (data != null) {
         try {
-          patchJson("/v1/company/users/" + moyklassUserId, Map.of(parentField, parentValue));
+          ensureFilial(moyklassUserId, data.getFilialId());
+          ensureJoin(moyklassUserId, data.getClassId());
         } catch (Exception e) {
-          log.warn("Failed to set parent field {} for user {}: {}", parentField, moyklassUserId, e.getMessage());
+          log.warn("Failed to assign filial/class: {}", e.getMessage());
+          return MoyKlassResult.failure("Не удалось записать в выбранную группу. Попробуйте позже.");
         }
       }
-      userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
-      return MoyKlassResult.success("Lead создан", String.valueOf(moyklassUserId));
+
+      if (!created) {
+        if (data != null && data.getClassId() != null && data.getClassId() > 0) {
+          return MoyKlassResult.success("Запись в группу выполнена.", String.valueOf(moyklassUserId));
+        }
+        return MoyKlassResult.success("Уже записан", String.valueOf(moyklassUserId));
+      }
+      return MoyKlassResult.success("Ребенок успешно записан", String.valueOf(moyklassUserId));
     } catch (Exception e) {
       log.warn("Failed to create lead: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при создании лида в МойКласс.");
@@ -193,6 +196,36 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     } catch (Exception e) {
       log.warn("Failed to link by phone: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
+    }
+  }
+
+  @Override
+  public List<Filial> listFilials() {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    try {
+      JsonNode response = getJson("/v1/company/filials");
+      JsonNode items = response.isArray() ? response : response.path("filials");
+      return parseFilials(items);
+    } catch (Exception e) {
+      log.warn("Failed to list filials: {}", e.getMessage());
+      return List.of();
+    }
+  }
+
+  @Override
+  public List<ClassGroup> listClasses() {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    try {
+      JsonNode response = getJson("/v1/company/classes");
+      JsonNode items = response.isArray() ? response : response.path("classes");
+      return parseClasses(items);
+    } catch (Exception e) {
+      log.warn("Failed to list classes: {}", e.getMessage());
+      return List.of();
     }
   }
 
@@ -390,20 +423,6 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     return "MAX user " + maxUserId;
   }
 
-  private String resolveParentField(String alias) {
-    if (alias == null) {
-      return null;
-    }
-    String normalized = alias.trim().toLowerCase();
-    if (normalized.startsWith("user.parent")) {
-      return normalized.substring("user.".length());
-    }
-    if (normalized.startsWith("parent")) {
-      return normalized;
-    }
-    return null;
-  }
-
   private String extractAttributeValue(JsonNode userNode, String alias) {
     if (userNode == null || alias == null) {
       return null;
@@ -544,6 +563,60 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private record UserCandidate(long id, String name, JsonNode node) {}
+
+  private List<Filial> parseFilials(JsonNode items) {
+    if (items == null || !items.isArray()) {
+      return List.of();
+    }
+    List<Filial> result = new ArrayList<>();
+    for (JsonNode node : items) {
+      long id = node.path("id").asLong(0);
+      if (id <= 0) {
+        continue;
+      }
+      String name = node.path("name").asText("");
+      String shortName = node.path("shortName").asText("");
+      String status = node.path("status").asText("");
+      result.add(new Filial(id, name, shortName, status));
+    }
+    return result;
+  }
+
+  private List<ClassGroup> parseClasses(JsonNode items) {
+    if (items == null || !items.isArray()) {
+      return List.of();
+    }
+    List<ClassGroup> result = new ArrayList<>();
+    for (JsonNode node : items) {
+      long id = node.path("id").asLong(0);
+      if (id <= 0) {
+        continue;
+      }
+      String name = node.path("name").asText("");
+      String status = node.path("status").asText("");
+      long filialId = node.path("filialId").asLong(0);
+      result.add(new ClassGroup(id, name, status, filialId));
+    }
+    return result;
+  }
+
+  private void ensureFilial(long moyklassUserId, Long filialId) throws IOException, InterruptedException {
+    if (filialId == null || filialId <= 0) {
+      return;
+    }
+    Map<String, Object> payload = Map.of("filials", List.of(filialId));
+    patchJson("/v1/company/users/" + moyklassUserId, payload);
+  }
+
+  private void ensureJoin(long moyklassUserId, Long classId) throws IOException, InterruptedException {
+    if (classId == null || classId <= 0) {
+      return;
+    }
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("userId", moyklassUserId);
+    payload.put("classId", classId);
+    postJson("/v1/company/joins", payload);
+  }
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
     return sendRequest("GET", path, null);

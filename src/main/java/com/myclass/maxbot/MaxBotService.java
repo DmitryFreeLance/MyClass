@@ -25,9 +25,10 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_SIGNUP_PHONE_EXISTING = "signup_phone_existing";
   private static final String STATE_SIGNUP_NAME_EXISTING = "signup_name_existing";
   private static final String STATE_SIGNUP_CHILD_NAME = "signup_child_name";
-  private static final String STATE_SIGNUP_PARENT_NAME = "signup_parent_name";
   private static final String STATE_SIGNUP_PHONE_NEW = "signup_phone_new";
   private static final String STATE_SIGNUP_EMAIL_NEW = "signup_email_new";
+  private static final String STATE_SIGNUP_FILIAL_PICK = "signup_filial_pick";
+  private static final String STATE_SIGNUP_CLASS_PICK = "signup_class_pick";
 
   private final BotProperties properties;
   private final MaxApiClient maxApiClient;
@@ -332,16 +333,20 @@ public class MaxBotService implements ApplicationRunner {
         handleSignupChildName(userId, text);
         return;
       }
-      if (STATE_SIGNUP_PARENT_NAME.equals(state.getState())) {
-        handleSignupParentName(userId, text);
-        return;
-      }
       if (STATE_SIGNUP_PHONE_NEW.equals(state.getState())) {
         handleSignupPhoneNew(userId, text);
         return;
       }
       if (STATE_SIGNUP_EMAIL_NEW.equals(state.getState())) {
         handleSignupEmailNew(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_FILIAL_PICK.equals(state.getState())) {
+        handleSignupFilialPick(userId, text);
+        return;
+      }
+      if (STATE_SIGNUP_CLASS_PICK.equals(state.getState())) {
+        handleSignupClassPick(userId, text);
         return;
       }
     }
@@ -488,18 +493,6 @@ public class MaxBotService implements ApplicationRunner {
     }
     SignupData data = getSignupData(userId);
     data.childName = childName;
-    saveSignupData(userId, STATE_SIGNUP_PARENT_NAME, data);
-    sendUserMessage(userId, "Введите ФИО родителя.");
-  }
-
-  private void handleSignupParentName(long userId, String text) {
-    String parentName = safeText(text);
-    if (parentName == null) {
-      sendUserMessage(userId, "Пожалуйста, введите ФИО родителя.");
-      return;
-    }
-    SignupData data = getSignupData(userId);
-    data.parentName = parentName;
     saveSignupData(userId, STATE_SIGNUP_PHONE_NEW, data);
     sendUserMessage(userId, "Введите номер телефона (только цифры).");
   }
@@ -528,9 +521,101 @@ public class MaxBotService implements ApplicationRunner {
     }
     SignupData data = getSignupData(userId);
     data.email = email;
+    startSignupFilialSelection(userId, data);
+  }
+
+  private void startSignupFilialSelection(long userId, SignupData data) {
+    List<MoyKlassClient.Filial> filials = moyKlassClient.listFilials();
+    List<MoyKlassClient.Filial> filtered = filials.stream()
+        .filter(this::isActiveFilial)
+        .toList();
+    if (filtered.isEmpty()) {
+      filtered = filials;
+    }
+    if (filtered.isEmpty()) {
+      userStateRepository.clearState(userId);
+      sendMenuMessage(userId, "Не удалось получить список филиалов. Попробуйте позже.");
+      return;
+    }
+
+    data.filialOptions = filtered.stream()
+        .map(this::toFilialOption)
+        .toList();
+    data.classOptions = null;
+    data.filialId = null;
+    data.filialName = null;
+    saveSignupData(userId, STATE_SIGNUP_FILIAL_PICK, data);
+
+    sendUserMessage(userId, formatOptionsMessage(
+        "Выберите филиал (введите номер):",
+        data.filialOptions
+    ));
+  }
+
+  private void handleSignupFilialPick(long userId, String text) {
+    SignupData data = getSignupData(userId);
+    if (data.filialOptions == null || data.filialOptions.isEmpty()) {
+      startSignupFilialSelection(userId, data);
+      return;
+    }
+    Integer index = parseSelectionIndex(text, data.filialOptions.size());
+    if (index == null) {
+      sendUserMessage(userId, "Введите номер от 1 до " + data.filialOptions.size() + ".");
+      return;
+    }
+    SignupOption selected = data.filialOptions.get(index - 1);
+    data.filialId = selected.id;
+    data.filialName = selected.name;
+    startSignupClassSelection(userId, data);
+  }
+
+  private void startSignupClassSelection(long userId, SignupData data) {
+    if (data.filialId == null || data.filialId <= 0) {
+      startSignupFilialSelection(userId, data);
+      return;
+    }
+    List<MoyKlassClient.ClassGroup> classes = moyKlassClient.listClasses();
+    List<MoyKlassClient.ClassGroup> filtered = classes.stream()
+        .filter(item -> item.getFilialId() == data.filialId)
+        .filter(this::isOpenedClass)
+        .toList();
+
+    if (filtered.isEmpty()) {
+      data.filialId = null;
+      data.filialName = null;
+      saveSignupData(userId, STATE_SIGNUP_FILIAL_PICK, data);
+      sendUserMessage(userId, "Для выбранного филиала нет доступных групп. Выберите другой филиал (номер).");
+      return;
+    }
+
+    data.classOptions = filtered.stream()
+        .map(this::toClassOption)
+        .toList();
+    saveSignupData(userId, STATE_SIGNUP_CLASS_PICK, data);
+
+    String title = data.filialName == null ? "Выберите группу (введите номер):"
+        : "Филиал: " + data.filialName + "\nВыберите группу (введите номер):";
+    sendUserMessage(userId, formatOptionsMessage(title, data.classOptions));
+  }
+
+  private void handleSignupClassPick(long userId, String text) {
+    SignupData data = getSignupData(userId);
+    if (data.classOptions == null || data.classOptions.isEmpty()) {
+      startSignupClassSelection(userId, data);
+      return;
+    }
+    Integer index = parseSelectionIndex(text, data.classOptions.size());
+    if (index == null) {
+      sendUserMessage(userId, "Введите номер от 1 до " + data.classOptions.size() + ".");
+      return;
+    }
+    SignupOption selected = data.classOptions.get(index - 1);
+    data.classId = selected.id;
+    data.className = selected.name;
+
     userStateRepository.clearState(userId);
     MoyKlassClient.SignupData payload = new MoyKlassClient.SignupData(
-        data.childName, data.parentName, data.phone, data.email
+        data.childName, data.phone, data.email, data.filialId, data.classId
     );
     MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX", payload);
     String response = formatSignupResponse(result);
@@ -663,9 +748,13 @@ public class MaxBotService implements ApplicationRunner {
     if (!result.isSuccess()) {
       return result.getMessage();
     }
-    String msg = result.getMessage() == null ? "" : result.getMessage().toLowerCase();
+    String raw = result.getMessage();
+    String msg = raw == null ? "" : raw.toLowerCase();
     if (msg.contains("уже записан")) {
       return "Вы уже записаны в нашей школе.";
+    }
+    if (raw != null && !raw.isBlank()) {
+      return raw;
     }
     return "Ребенок успешно записан";
   }
@@ -709,9 +798,90 @@ public class MaxBotService implements ApplicationRunner {
 
   private static class SignupData {
     public String childName;
-    public String parentName;
     public String phone;
     public String email;
+    public Long filialId;
+    public String filialName;
+    public Long classId;
+    public String className;
+    public List<SignupOption> filialOptions;
+    public List<SignupOption> classOptions;
+  }
+
+  private static class SignupOption {
+    public long id;
+    public String name;
+
+    public SignupOption() {
+    }
+
+    public SignupOption(long id, String name) {
+      this.id = id;
+      this.name = name;
+    }
+  }
+
+  private SignupOption toFilialOption(MoyKlassClient.Filial filial) {
+    String name = filial.getName();
+    String shortName = filial.getShortName();
+    if (shortName != null && !shortName.isBlank()) {
+      if (name == null || name.isBlank()) {
+        name = shortName;
+      } else if (!name.toLowerCase().contains(shortName.toLowerCase())) {
+        name = shortName + " — " + name;
+      }
+    }
+    return new SignupOption(filial.getId(), name == null ? "" : name);
+  }
+
+  private SignupOption toClassOption(MoyKlassClient.ClassGroup group) {
+    String name = group.getName();
+    return new SignupOption(group.getId(), name == null ? "" : name);
+  }
+
+  private boolean isActiveFilial(MoyKlassClient.Filial filial) {
+    if (filial == null) {
+      return false;
+    }
+    String status = filial.getStatus();
+    return status == null || status.isBlank() || status.equalsIgnoreCase("active");
+  }
+
+  private boolean isOpenedClass(MoyKlassClient.ClassGroup group) {
+    if (group == null) {
+      return false;
+    }
+    String status = group.getStatus();
+    return status == null || status.isBlank() || status.equalsIgnoreCase("opened");
+  }
+
+  private Integer parseSelectionIndex(String text, int max) {
+    if (text == null) {
+      return null;
+    }
+    String trimmed = text.trim();
+    if (!trimmed.matches("\\\\d+")) {
+      return null;
+    }
+    try {
+      int value = Integer.parseInt(trimmed);
+      if (value < 1 || value > max) {
+        return null;
+      }
+      return value;
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  private String formatOptionsMessage(String title, List<SignupOption> options) {
+    StringBuilder sb = new StringBuilder();
+    sb.append(title);
+    for (int i = 0; i < options.size(); i++) {
+      SignupOption option = options.get(i);
+      sb.append("\n").append(i + 1).append(". ").append(option.name == null ? "" : option.name);
+    }
+    return sb.toString();
   }
 
   private void sleepQuietly(long millis) {
