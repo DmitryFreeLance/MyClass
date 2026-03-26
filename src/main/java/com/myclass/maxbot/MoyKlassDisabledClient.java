@@ -25,6 +25,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassUser getUserInfo(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; getUserInfo skipped");
+    return null;
+  }
+
+  @Override
   public MoyKlassResult getRemainingLessons(long maxUserId) {
     log.warn("MoyKlass integration disabled; getRemainingLessons skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");

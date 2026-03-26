@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -29,12 +30,14 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_SIGNUP_EMAIL_NEW = "signup_email_new";
   private static final String STATE_SIGNUP_FILIAL_PICK = "signup_filial_pick";
   private static final String STATE_SIGNUP_CLASS_PICK = "signup_class_pick";
+  private static final String SCHEDULE_URL = "https://дкразвитие.рф/schedule.html";
 
   private final BotProperties properties;
   private final MaxApiClient maxApiClient;
   private final KeyboardFactory keyboardFactory;
   private final BotStateRepository botStateRepository;
   private final UserRepository userRepository;
+  private final UserChildRepository userChildRepository;
   private final DialogRepository dialogRepository;
   private final DialogService dialogService;
   private final MoyKlassClient moyKlassClient;
@@ -42,6 +45,7 @@ public class MaxBotService implements ApplicationRunner {
   private final ObjectMapper objectMapper;
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private volatile boolean running = true;
 
   public MaxBotService(
@@ -50,6 +54,7 @@ public class MaxBotService implements ApplicationRunner {
       KeyboardFactory keyboardFactory,
       BotStateRepository botStateRepository,
       UserRepository userRepository,
+      UserChildRepository userChildRepository,
       DialogRepository dialogRepository,
       DialogService dialogService,
       MoyKlassClient moyKlassClient,
@@ -61,6 +66,7 @@ public class MaxBotService implements ApplicationRunner {
     this.keyboardFactory = keyboardFactory;
     this.botStateRepository = botStateRepository;
     this.userRepository = userRepository;
+    this.userChildRepository = userChildRepository;
     this.dialogRepository = dialogRepository;
     this.dialogService = dialogService;
     this.moyKlassClient = moyKlassClient;
@@ -85,6 +91,7 @@ public class MaxBotService implements ApplicationRunner {
   public void shutdown() {
     running = false;
     executor.shutdownNow();
+    scheduler.shutdownNow();
   }
 
   private void pollLoop() {
@@ -213,8 +220,7 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
     if ("signup:existing_no".equals(payload)) {
-      userStateRepository.clearState(userId);
-      startSignupChildName(userId);
+      handleNewSignupRedirect(userId);
       return;
     }
 
@@ -222,8 +228,19 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
+    if (payload.startsWith("child:select:")) {
+      long childId = parseLongSafe(payload.substring("child:select:".length()));
+      if (childId > 0) {
+        handleChildSelect(userId, childId);
+      }
+      return;
+    }
+
     switch (payload) {
-      case "action:signup" -> promptSignupChoice(userId);
+      case "action:signup" -> promptSignupChoice(userId, false);
+      case "action:children" -> showChildrenMenu(userId);
+      case "action:add_child" -> promptSignupChoice(userId, true);
+      case "action:link" -> startSignupPhoneFlow(userId);
       case "action:passes" -> handleRemainingLessons(userId);
       case "action:invoice" -> handleInvoice(userId);
       case "action:menu" -> sendWelcome(userId);
@@ -329,24 +346,12 @@ public class MaxBotService implements ApplicationRunner {
         handleSignupNameExisting(userId, text);
         return;
       }
-      if (STATE_SIGNUP_CHILD_NAME.equals(state.getState())) {
-        handleSignupChildName(userId, text);
-        return;
-      }
-      if (STATE_SIGNUP_PHONE_NEW.equals(state.getState())) {
-        handleSignupPhoneNew(userId, text);
-        return;
-      }
-      if (STATE_SIGNUP_EMAIL_NEW.equals(state.getState())) {
-        handleSignupEmailNew(userId, text);
-        return;
-      }
-      if (STATE_SIGNUP_FILIAL_PICK.equals(state.getState())) {
-        handleSignupFilialPick(userId, text);
-        return;
-      }
-      if (STATE_SIGNUP_CLASS_PICK.equals(state.getState())) {
-        handleSignupClassPick(userId, text);
+      if (STATE_SIGNUP_CHILD_NAME.equals(state.getState())
+          || STATE_SIGNUP_PHONE_NEW.equals(state.getState())
+          || STATE_SIGNUP_EMAIL_NEW.equals(state.getState())
+          || STATE_SIGNUP_FILIAL_PICK.equals(state.getState())
+          || STATE_SIGNUP_CLASS_PICK.equals(state.getState())) {
+        handleNewSignupRedirect(userId);
         return;
       }
     }
@@ -357,7 +362,7 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     if (text.equalsIgnoreCase("Записаться") || text.contains("Запис")) {
-      promptSignupChoice(userId);
+      promptSignupChoice(userId, hasLinkedChildren(userId));
       return;
     }
 
@@ -371,19 +376,17 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
+    if (text.equalsIgnoreCase("Мои дети") || text.contains("дет")) {
+      showChildrenMenu(userId);
+      return;
+    }
+
     sendWelcome(userId);
   }
 
   private void sendWelcome(long userId) {
     String text = "Привет! Я помогу записать ребенка, проверить абонементы и выставить счет. Выберите действие ниже.";
-    try {
-      maxApiClient.sendMessageToUser(userId, Map.of(
-          "text", text,
-          "attachments", keyboardFactory.mainMenuAttachments()
-      ));
-    } catch (Exception e) {
-      log.warn("Failed to send welcome: {}", e.getMessage());
-    }
+    sendMainMenuMessage(userId, text);
   }
 
   private void handleSignup(long userId) {
@@ -392,18 +395,20 @@ public class MaxBotService implements ApplicationRunner {
     sendMenuMessage(userId, response);
   }
 
-  private void promptSignupChoice(long userId) {
-    MoyKlassResult profile = moyKlassClient.getProfileInfo(userId);
-    if (profile.isSuccess()) {
-      String phone = profile.getData();
-      String response = (phone != null && !phone.isBlank())
-          ? "Вы уже записаны в нашей школе по номеру телефона: " + phone
-          : "Вы уже записаны в нашей школе.";
-      sendMenuMessage(userId, response);
-      return;
+  private void promptSignupChoice(long userId, boolean ignoreExistingProfile) {
+    if (!ignoreExistingProfile) {
+      MoyKlassResult profile = moyKlassClient.getProfileInfo(userId);
+      if (profile.isSuccess()) {
+        String phone = profile.getData();
+        String response = (phone != null && !phone.isBlank())
+            ? "Вы уже записаны в нашей школе по номеру телефона: " + phone
+            : "Вы уже записаны в нашей школе.";
+        sendMenuMessage(userId, response);
+        return;
+      }
     }
     userStateRepository.setState(userId, STATE_SIGNUP_CHOICE, null, Instant.now().toEpochMilli());
-    String text = "Вы уже занимались в нашей школе?";
+    String text = "Вы уже зарегистрированы в нашей школе?";
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
@@ -421,22 +426,52 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
     if (normalized.startsWith("нет") || normalized.contains("нов")) {
-      userStateRepository.clearState(userId);
-      startSignupChildName(userId);
+      handleNewSignupRedirect(userId);
       return;
     }
     sendUserMessage(userId, "Ответьте, пожалуйста, \"Да\" или \"Нет\".");
   }
 
+  private void handleNewSignupRedirect(long userId) {
+    userStateRepository.clearState(userId);
+    sendScheduleMessage(userId);
+    scheduler.schedule(() -> sendLinkAccountPrompt(userId), 3, TimeUnit.SECONDS);
+  }
+
+  private void sendScheduleMessage(long userId) {
+    String text = "Для регистрации перейдите по ссылке: " + SCHEDULE_URL;
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", keyboardFactory.scheduleLinkAttachments()
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send schedule link: {}", e.getMessage());
+    }
+  }
+
+  private void sendLinkAccountPrompt(long userId) {
+    String text = "После успешной регистрации необходимо связать учетные записи.";
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", keyboardFactory.linkAccountAttachments()
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send link account prompt: {}", e.getMessage());
+    }
+  }
+
   private void startSignupPhoneFlow(long userId) {
     userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
-    sendUserMessage(userId, "Введите номер телефона, который использовали при оплате (только цифры).");
+    sendUserMessage(userId, "Введите номер телефона, который использовали при регистрации или оплате (только цифры).");
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
     MoyKlassResult result = moyKlassClient.linkByPhone(userId, text);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
+      rememberLinkedChild(userId, result, null);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
@@ -474,6 +509,7 @@ public class MaxBotService implements ApplicationRunner {
     MoyKlassResult result = moyKlassClient.linkByPhoneAndName(userId, phone, childName);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
+      rememberLinkedChild(userId, result, childName);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
@@ -667,6 +703,17 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
+  private void sendUserMessageWithAttachments(long userId, String text, List<Map<String, Object>> attachments) {
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", attachments
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send message with attachments to user {}: {}", userId, e.getMessage());
+    }
+  }
+
   private void sendMenuMessage(long userId, String text) {
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
@@ -676,6 +723,47 @@ public class MaxBotService implements ApplicationRunner {
     } catch (Exception e) {
       log.warn("Failed to send menu message to user {}: {}", userId, e.getMessage());
     }
+  }
+
+  private void sendMainMenuMessage(long userId, String text) {
+    boolean linked = hasLinkedChildren(userId);
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", keyboardFactory.mainMenuAttachments(linked)
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send main menu message to user {}: {}", userId, e.getMessage());
+    }
+  }
+
+  private void showChildrenMenu(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Пока нет связанных детей. Нажмите \"Связать\", чтобы привязать учетную запись.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+
+    sendUserMessageWithAttachments(userId, "Выберите ребенка:", buildChildrenAttachments(children));
+  }
+
+  private void handleChildSelect(long userId, long childId) {
+    Optional<UserChildRepository.UserChild> childOpt = userChildRepository.findChild(userId, childId);
+    if (childOpt.isEmpty()) {
+      sendUserMessage(userId, "Не удалось найти выбранного ребенка. Попробуйте снова.");
+      return;
+    }
+    UserChildRepository.UserChild child = childOpt.get();
+    userRepository.setMoyklassUserId(userId, child.getMoyklassUserId());
+
+    MoyKlassResult remaining = moyKlassClient.getRemainingLessons(userId);
+    MoyKlassResult invoice = moyKlassClient.createInvoice(userId);
+    String message = buildChildSummary(child, remaining, invoice);
+    sendMainMenuMessage(userId, message);
   }
 
   private void sendSignupMenuMessage(long userId, String text) {
@@ -757,6 +845,85 @@ public class MaxBotService implements ApplicationRunner {
       return raw;
     }
     return "Ребенок успешно записан";
+  }
+
+  private boolean hasLinkedChildren(long userId) {
+    return !ensureChildrenLoaded(userId).isEmpty();
+  }
+
+  private List<UserChildRepository.UserChild> ensureChildrenLoaded(long userId) {
+    List<UserChildRepository.UserChild> children = userChildRepository.listChildren(userId);
+    if (!children.isEmpty()) {
+      return children;
+    }
+    Optional<UserRecord> userOpt = userRepository.findByMaxUserId(userId);
+    if (userOpt.isEmpty() || userOpt.get().getMoyklassUserId() == null) {
+      return children;
+    }
+    long moyklassUserId = userOpt.get().getMoyklassUserId();
+    rememberChild(userId, moyklassUserId, null);
+    return userChildRepository.listChildren(userId);
+  }
+
+  private void rememberLinkedChild(long userId, MoyKlassResult result, String fallbackName) {
+    if (result == null || !result.isSuccess()) {
+      return;
+    }
+    long moyklassUserId = parseLongSafe(result.getData());
+    if (moyklassUserId <= 0) {
+      return;
+    }
+    rememberChild(userId, moyklassUserId, fallbackName);
+  }
+
+  private void rememberChild(long userId, long moyklassUserId, String fallbackName) {
+    String name = fallbackName;
+    MoyKlassClient.MoyKlassUser info = moyKlassClient.getUserInfo(moyklassUserId);
+    if (info != null && info.getName() != null && !info.getName().isBlank()) {
+      name = info.getName();
+    }
+    if (name == null || name.isBlank()) {
+      name = "Ребенок " + moyklassUserId;
+    }
+    userChildRepository.upsertChild(userId, moyklassUserId, name, Instant.now().toEpochMilli());
+    userRepository.setMoyklassUserId(userId, moyklassUserId);
+  }
+
+  private List<Map<String, Object>> buildChildrenAttachments(List<UserChildRepository.UserChild> children) {
+    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
+    for (UserChildRepository.UserChild child : children) {
+      String label = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      rows.add(List.of(callbackButton(label, "child:select:" + child.getMoyklassUserId())));
+    }
+    rows.add(List.of(callbackButton("➕ Добавить ребенка", "action:add_child")));
+    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
+  private Map<String, Object> callbackButton(String text, String payload) {
+    return Map.of(
+        "type", "callback",
+        "text", text,
+        "payload", payload
+    );
+  }
+
+  private String buildChildSummary(UserChildRepository.UserChild child, MoyKlassResult remaining, MoyKlassResult invoice) {
+    String name = child.getChildName() == null || child.getChildName().isBlank()
+        ? "Ребенок " + child.getMoyklassUserId()
+        : child.getChildName();
+    String remainingText = remaining.isSuccess()
+        ? (remaining.getData() == null ? remaining.getMessage() : "Осталось занятий: " + remaining.getData())
+        : remaining.getMessage();
+    String invoiceText = invoice.isSuccess()
+        ? (invoice.getData() == null ? invoice.getMessage() : "Счет на оплату: " + invoice.getData())
+        : "Счет на оплату: " + invoice.getMessage();
+    return "Выбран ребенок: " + name + "\n" + remainingText + "\n" + invoiceText;
   }
 
   private String safeText(String text) {
@@ -860,11 +1027,12 @@ public class MaxBotService implements ApplicationRunner {
       return null;
     }
     String trimmed = text.trim();
-    if (!trimmed.matches("\\\\d+")) {
+    java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+)").matcher(trimmed);
+    if (!matcher.find()) {
       return null;
     }
     try {
-      int value = Integer.parseInt(trimmed);
+      int value = Integer.parseInt(matcher.group(1));
       if (value < 1 || value > max) {
         return null;
       }

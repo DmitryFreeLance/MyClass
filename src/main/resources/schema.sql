@@ -36,3 +36,12 @@ CREATE TABLE IF NOT EXISTS user_states (
   data TEXT,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_children (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  max_user_id INTEGER NOT NULL,
+  moyklass_user_id INTEGER NOT NULL,
+  child_name TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(max_user_id, moyklass_user_id)
+);

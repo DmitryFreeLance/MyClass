@@ -230,6 +230,22 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassUser getUserInfo(long moyklassUserId) {
+    if (moyklassUserId <= 0) {
+      return null;
+    }
+    try {
+      JsonNode response = getJson("/v1/company/users/" + moyklassUserId);
+      String name = response.path("name").asText(null);
+      String phone = response.path("phone").asText(null);
+      return new MoyKlassUser(moyklassUserId, name, phone);
+    } catch (Exception e) {
+      log.warn("Failed to fetch user info: {}", e.getMessage());
+      return null;
+    }
+  }
+
+  @Override
   public MoyKlassResult getProfileInfo(long maxUserId) {
     Long moyklassUserId = resolveMoyklassUserId(maxUserId);
     if (moyklassUserId == null) {
