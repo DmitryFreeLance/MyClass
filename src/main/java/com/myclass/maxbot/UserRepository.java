@@ -64,4 +64,11 @@ public class UserRepository {
         moyklassUserId, maxUserId
     );
   }
+
+  public void clearMoyklassUserId(long maxUserId) {
+    jdbcTemplate.update(
+        "UPDATE users SET moyklass_user_id = NULL WHERE max_user_id = ?",
+        maxUserId
+    );
+  }
 }

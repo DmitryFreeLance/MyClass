@@ -50,6 +50,17 @@ public class KeyboardFactory {
     ));
   }
 
+  public List<Map<String, Object>> signupMenuAttachments() {
+    List<List<Map<String, Object>>> rows = new ArrayList<>();
+    rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
+    rows.add(List.of(button("callback", "🏠 В меню", "action:menu")));
+
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
   private Map<String, Object> button(String type, String text, String payload) {
     return Map.of(
         "type", type,

@@ -50,7 +50,19 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
     UserRecord user = userOpt.get();
     if (user.getMoyklassUserId() != null) {
-      return MoyKlassResult.success("Уже записан", String.valueOf(user.getMoyklassUserId()));
+      long existingId = user.getMoyklassUserId();
+      try {
+        getJson("/v1/company/users/" + existingId);
+        return MoyKlassResult.success("Уже записан", String.valueOf(existingId));
+      } catch (Exception e) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        if (message.contains("404")) {
+          userRepository.clearMoyklassUserId(maxUserId);
+        } else {
+          log.warn("Failed to verify existing user in CRM: {}", e.getMessage());
+          return MoyKlassResult.failure("Не удалось проверить профиль в МойКласс.");
+        }
+      }
     }
 
     String name = data != null && data.getChildName() != null && !data.getChildName().isBlank()

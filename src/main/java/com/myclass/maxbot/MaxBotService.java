@@ -358,9 +358,7 @@ public class MaxBotService implements ApplicationRunner {
 
   private void handleSignup(long userId) {
     MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX", null);
-    String response = result.isSuccess()
-        ? "Ребенок успешно записан"
-        : result.getMessage();
+    String response = formatSignupResponse(result);
     sendMenuMessage(userId, response);
   }
 
@@ -412,7 +410,12 @@ public class MaxBotService implements ApplicationRunner {
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
-    sendMenuMessage(userId, result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".");
+    String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".";
+    if (containsPhoneParseError(result.getMessage())) {
+      sendSignupMenuMessage(userId, message);
+      return;
+    }
+    sendMenuMessage(userId, message);
   }
 
   private void startSignupChildName(long userId) {
@@ -447,7 +450,7 @@ public class MaxBotService implements ApplicationRunner {
   private void handleSignupPhoneNew(long userId, String text) {
     String phone = text == null ? "" : text.replaceAll("\\\\D", "");
     if (phone.length() < 10) {
-      sendUserMessage(userId, "Не смог распознать номер. Введите номер телефона цифрами.");
+      sendSignupMenuMessage(userId, "Не смог распознать номер. Введите номер телефона цифрами.");
       return;
     }
     SignupData data = getSignupData(userId);
@@ -473,9 +476,7 @@ public class MaxBotService implements ApplicationRunner {
         data.childName, data.parentName, data.phone, data.email
     );
     MoyKlassResult result = moyKlassClient.createLead(userId, "Запись из MAX", payload);
-    String response = result.isSuccess()
-        ? "Ребенок успешно записан"
-        : result.getMessage();
+    String response = formatSignupResponse(result);
     sendMenuMessage(userId, response);
   }
 
@@ -535,6 +536,17 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
+  private void sendSignupMenuMessage(long userId, String text) {
+    try {
+      maxApiClient.sendMessageToUser(userId, Map.of(
+          "text", text,
+          "attachments", keyboardFactory.signupMenuAttachments()
+      ));
+    } catch (Exception e) {
+      log.warn("Failed to send signup menu message to user {}: {}", userId, e.getMessage());
+    }
+  }
+
   private long parseLongSafe(String value) {
     try {
       return Long.parseLong(value);
@@ -548,6 +560,27 @@ public class MaxBotService implements ApplicationRunner {
       return false;
     }
     return message.toLowerCase().contains("не найден профиль");
+  }
+
+  private boolean containsPhoneParseError(String message) {
+    if (message == null) {
+      return false;
+    }
+    return message.toLowerCase().contains("не удалось распознать номер");
+  }
+
+  private String formatSignupResponse(MoyKlassResult result) {
+    if (result == null) {
+      return "Не удалось записать. Попробуйте позже.";
+    }
+    if (!result.isSuccess()) {
+      return result.getMessage();
+    }
+    String msg = result.getMessage() == null ? "" : result.getMessage().toLowerCase();
+    if (msg.contains("уже записан")) {
+      return "Вы уже записаны в нашей школе.";
+    }
+    return "Ребенок успешно записан";
   }
 
   private String safeText(String text) {
