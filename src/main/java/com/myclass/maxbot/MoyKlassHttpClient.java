@@ -85,19 +85,27 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           payload.put("email", data.getEmail().trim());
         }
       }
+      List<Map<String, Object>> attributes = new ArrayList<>();
       if (config.getMaxIdAttributeAlias() != null && !config.getMaxIdAttributeAlias().isBlank()) {
-        List<Map<String, Object>> attributes = new ArrayList<>();
         attributes.add(Map.of(
-            "attributeAlias", config.getMaxIdAttributeAlias(),
+            "attributeAlias", config.getMaxIdAttributeAlias().trim(),
             "value", String.valueOf(maxUserId)
         ));
-        if (data != null && data.getParentName() != null && !data.getParentName().isBlank()
-            && config.getParentNameAttributeAlias() != null && !config.getParentNameAttributeAlias().isBlank()) {
+      }
+      if (data != null && data.getParentName() != null && !data.getParentName().isBlank()
+          && config.getParentNameAttributeAlias() != null && !config.getParentNameAttributeAlias().isBlank()) {
+        String parentAlias = config.getParentNameAttributeAlias().trim();
+        String parentField = resolveParentField(parentAlias);
+        if (parentField != null) {
+          payload.put(parentField, data.getParentName());
+        } else {
           attributes.add(Map.of(
-              "attributeAlias", config.getParentNameAttributeAlias(),
+              "attributeAlias", parentAlias,
               "value", data.getParentName()
           ));
         }
+      }
+      if (!attributes.isEmpty()) {
         payload.put("attributes", attributes);
       }
 
@@ -287,6 +295,20 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return user.getUsername();
     }
     return "MAX user " + maxUserId;
+  }
+
+  private String resolveParentField(String alias) {
+    if (alias == null) {
+      return null;
+    }
+    String normalized = alias.trim().toLowerCase();
+    if (normalized.startsWith("user.parent")) {
+      return normalized.substring("user.".length());
+    }
+    if (normalized.startsWith("parent")) {
+      return normalized;
+    }
+    return null;
   }
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
