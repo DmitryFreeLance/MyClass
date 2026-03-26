@@ -163,6 +163,7 @@ public class MaxBotService implements ApplicationRunner {
 
     String text = message.path("body").path("text").asText("").trim();
     if (text.isEmpty()) {
+      sendWelcome(senderId);
       return;
     }
 
@@ -385,7 +386,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendWelcome(long userId) {
-    String text = "Привет! Я помогу записать ребенка, проверить абонементы и выставить счет. Выберите действие ниже.";
+    String text = "Здравствуйте. \nВыберите действие.";
     sendMainMenuMessage(userId, text);
   }
 

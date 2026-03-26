@@ -14,7 +14,7 @@ public class KeyboardFactory {
     }
     rows.add(List.of(button("callback", "🎟️ Абонементы", "action:passes")));
     rows.add(List.of(button("callback", "💳 Счет на оплату", "action:invoice")));
-    rows.add(List.of(linkButton("💬 Связаться с педагогом", "https://max.ru/u/f9LHodD0cOI1bQhXnFdFq9sJL6NGD_9AD2zjkNxHcHNh0Om0GOo-RQYznQE")));
+    rows.add(List.of(linkButton("💬 Написать в чат", "https://max.ru/u/f9LHodD0cOI1bQhXnFdFq9sJL6NGD_9AD2zjkNxHcHNh0Om0GOo-RQYznQE")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",

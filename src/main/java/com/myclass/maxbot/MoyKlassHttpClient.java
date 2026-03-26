@@ -152,6 +152,8 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
       int totalRemaining = 0;
       int computed = 0;
+      Map<String, Integer> byCourse = new LinkedHashMap<>();
+      boolean hasCourseNames = false;
       for (JsonNode sub : subs) {
         int visitCount = sub.path("visitCount").asInt(-1);
         double visited = -1;
@@ -165,11 +167,26 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           int remaining = (int) Math.max(visitCount - Math.round(visited), 0);
           totalRemaining += remaining;
           computed++;
+          String courseName = extractCourseName(sub);
+          if (courseName != null && !courseName.isBlank()) {
+            hasCourseNames = true;
+          } else {
+            long courseId = sub.path("courseId").asLong(0);
+            courseName = courseId > 0 ? "Курс #" + courseId : "Прочее";
+          }
+          byCourse.merge(courseName, remaining, Integer::sum);
         }
       }
 
       if (computed == 0) {
         return MoyKlassResult.failure("Не удалось вычислить остаток занятий.");
+      }
+      if (hasCourseNames || byCourse.size() > 1) {
+        StringBuilder sb = new StringBuilder("Остаток занятий:");
+        for (Map.Entry<String, Integer> entry : byCourse.entrySet()) {
+          sb.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+        }
+        return MoyKlassResult.success(sb.toString(), null);
       }
       return MoyKlassResult.success("Остаток занятий", String.valueOf(totalRemaining));
     } catch (Exception e) {
@@ -479,6 +496,25 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return true;
     }
     return false;
+  }
+
+  private String extractCourseName(JsonNode sub) {
+    if (sub == null) {
+      return null;
+    }
+    String name = sub.path("course").path("name").asText(null);
+    if (name != null && !name.isBlank()) {
+      return name;
+    }
+    name = sub.path("courseName").asText(null);
+    if (name != null && !name.isBlank()) {
+      return name;
+    }
+    name = sub.path("course").path("title").asText(null);
+    if (name != null && !name.isBlank()) {
+      return name;
+    }
+    return null;
   }
 
   private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
