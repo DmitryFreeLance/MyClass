@@ -472,7 +472,7 @@ public class MaxBotService implements ApplicationRunner {
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
-    sendUserMessage(result.getMessage());
+    sendUserMessage(userId, result.getMessage());
   }
 
   private void startSignupChildName(long userId) {
