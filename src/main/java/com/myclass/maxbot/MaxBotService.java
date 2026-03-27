@@ -434,17 +434,6 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void promptSignupChoice(long userId, boolean ignoreExistingProfile) {
-    if (!ignoreExistingProfile) {
-      MoyKlassResult profile = moyKlassClient.getProfileInfo(userId);
-      if (profile.isSuccess()) {
-        String phone = profile.getData();
-        String response = (phone != null && !phone.isBlank())
-            ? "Вы уже записаны в нашей школе по номеру телефона: " + phone
-            : "Вы уже записаны в нашей школе.";
-        sendMenuMessage(userId, response);
-        return;
-      }
-    }
     userStateRepository.setState(userId, STATE_SIGNUP_CHOICE, null, Instant.now().toEpochMilli());
     String text = "Вы уже зарегистрированы в нашей школе?";
     try {
@@ -942,12 +931,10 @@ public class MaxBotService implements ApplicationRunner {
     Optional<UserRecord> userOpt = userRepository.findByMaxUserId(userId);
     Long currentId = userOpt.map(UserRecord::getMoyklassUserId).orElse(null);
     List<UserChildRepository.UserChild> remaining = userChildRepository.listChildren(userId);
-    if (currentId != null && currentId == childId) {
-      if (remaining.isEmpty()) {
-        userRepository.clearMoyklassUserId(userId);
-      } else {
-        userRepository.setMoyklassUserId(userId, remaining.get(0).getMoyklassUserId());
-      }
+    if (remaining.isEmpty()) {
+      userRepository.clearMoyklassUserId(userId);
+    } else if (currentId != null && currentId == childId) {
+      userRepository.setMoyklassUserId(userId, remaining.get(0).getMoyklassUserId());
     }
 
     String name = child.getChildName() == null || child.getChildName().isBlank()
@@ -1139,7 +1126,9 @@ public class MaxBotService implements ApplicationRunner {
           : child.getChildName();
       rows.add(List.of(callbackButton(label, prefix + ":child:" + child.getMoyklassUserId())));
     }
-    rows.add(List.of(callbackButton("Для всех", prefix + ":all")));
+    if (children.size() > 1) {
+      rows.add(List.of(callbackButton("Для всех", prefix + ":all")));
+    }
     rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",
