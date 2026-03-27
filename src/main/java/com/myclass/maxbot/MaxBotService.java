@@ -256,6 +256,13 @@ public class MaxBotService implements ApplicationRunner {
       }
       return;
     }
+    if (payload.startsWith("child:remove:")) {
+      long childId = parseLongSafe(payload.substring("child:remove:".length()));
+      if (childId > 0) {
+        handleChildRemove(userId, childId);
+      }
+      return;
+    }
 
     if (payload.startsWith("passes:")) {
       handlePassesPayload(userId, payload);
@@ -270,6 +277,7 @@ public class MaxBotService implements ApplicationRunner {
       case "action:signup" -> promptSignupChoice(userId, false);
       case "action:children" -> showChildrenMenu(userId);
       case "action:add_child" -> promptSignupChoice(userId, true);
+      case "action:remove_child" -> showRemoveChildMenu(userId);
       case "action:link" -> startSignupPhoneFlow(userId);
       case "action:passes" -> promptPassesTarget(userId);
       case "action:invoice" -> promptInvoiceTarget(userId);
@@ -887,14 +895,7 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
-    StringBuilder sb = new StringBuilder("Связанные дети:");
-    for (UserChildRepository.UserChild child : children) {
-      String name = child.getChildName() == null || child.getChildName().isBlank()
-          ? "Ребенок " + child.getMoyklassUserId()
-          : child.getChildName();
-      sb.append("\n• ").append(name);
-    }
-    sendUserMessageWithAttachments(userId, sb.toString(), buildChildrenAttachments(children));
+    sendUserMessageWithAttachments(userId, buildChildrenListText(children), buildChildrenAttachments(children));
   }
 
   private void handleChildSelect(long userId, long childId) {
@@ -909,6 +910,59 @@ public class MaxBotService implements ApplicationRunner {
         ? "Ребенок " + child.getMoyklassUserId()
         : child.getChildName();
     sendMainMenuMessage(userId, "Выбран ребенок: " + name);
+  }
+
+  private void showRemoveChildMenu(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Пока нет связанных детей.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+    sendUserMessageWithAttachments(
+        userId,
+        "Выберите, какого ребенка нужно отвязать от учетной записи",
+        buildRemoveChildrenAttachments(children)
+    );
+  }
+
+  private void handleChildRemove(long userId, long childId) {
+    Optional<UserChildRepository.UserChild> childOpt = userChildRepository.findChild(userId, childId);
+    if (childOpt.isEmpty()) {
+      sendUserMessage(userId, "Не удалось найти выбранного ребенка. Попробуйте снова.");
+      return;
+    }
+
+    UserChildRepository.UserChild child = childOpt.get();
+    userChildRepository.deleteChild(userId, childId);
+
+    Optional<UserRecord> userOpt = userRepository.findByMaxUserId(userId);
+    Long currentId = userOpt.map(UserRecord::getMoyklassUserId).orElse(null);
+    List<UserChildRepository.UserChild> remaining = userChildRepository.listChildren(userId);
+    if (currentId != null && currentId == childId) {
+      if (remaining.isEmpty()) {
+        userRepository.clearMoyklassUserId(userId);
+      } else {
+        userRepository.setMoyklassUserId(userId, remaining.get(0).getMoyklassUserId());
+      }
+    }
+
+    String name = child.getChildName() == null || child.getChildName().isBlank()
+        ? "Ребенок " + child.getMoyklassUserId()
+        : child.getChildName();
+    if (remaining.isEmpty()) {
+      sendMainMenuMessage(userId, "Ребенок \"" + name + "\" отвязан. Связанных детей больше нет.");
+      return;
+    }
+
+    sendUserMessageWithAttachments(
+        userId,
+        "Ребенок \"" + name + "\" отвязан.\n\n" + buildChildrenListText(remaining),
+        buildChildrenAttachments(remaining)
+    );
   }
 
   private void sendSignupMenuMessage(long userId, String text) {
@@ -1040,9 +1094,36 @@ public class MaxBotService implements ApplicationRunner {
     userRepository.setMoyklassUserId(userId, moyklassUserId);
   }
 
+  private String buildChildrenListText(List<UserChildRepository.UserChild> children) {
+    StringBuilder sb = new StringBuilder("Связанные дети:");
+    for (UserChildRepository.UserChild child : children) {
+      String name = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      sb.append("\n• ").append(name);
+    }
+    return sb.toString();
+  }
+
   private List<Map<String, Object>> buildChildrenAttachments(List<UserChildRepository.UserChild> children) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
     rows.add(List.of(callbackButton("➕ Добавить ребенка", "action:add_child")));
+    rows.add(List.of(callbackButton("- Удалить ребенка", "action:remove_child")));
+    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
+  private List<Map<String, Object>> buildRemoveChildrenAttachments(List<UserChildRepository.UserChild> children) {
+    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
+    for (UserChildRepository.UserChild child : children) {
+      String label = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      rows.add(List.of(callbackButton(label, "child:remove:" + child.getMoyklassUserId())));
+    }
     rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",

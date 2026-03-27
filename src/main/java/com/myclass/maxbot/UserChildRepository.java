@@ -54,6 +54,13 @@ public class UserChildRepository {
     );
   }
 
+  public void deleteChild(long maxUserId, long moyklassUserId) {
+    jdbcTemplate.update(
+        "DELETE FROM user_children WHERE max_user_id = ? AND moyklass_user_id = ?",
+        maxUserId, moyklassUserId
+    );
+  }
+
   public static class UserChild {
     private final long id;
     private final long maxUserId;
