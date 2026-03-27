@@ -78,7 +78,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> scheduleLinkAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(linkButton("Открыть расписание", "https://дкразвитие.рф/schedule.html")));
+    rows.add(List.of(linkButton("Зарегистрироваться", "https://дкразвитие.рф/schedule.html")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",

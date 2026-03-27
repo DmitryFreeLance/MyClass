@@ -37,6 +37,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; getRemainingLessonsByMoyklassUserId skipped for user {}", moyklassUserId);
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
     log.warn("MoyKlass integration disabled; linkByPhone skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
@@ -51,6 +57,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   @Override
   public MoyKlassResult createInvoice(long maxUserId) {
     log.warn("MoyKlass integration disabled; createInvoice skipped for user {}", maxUserId);
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
+  public MoyKlassResult createInvoiceByMoyklassUserId(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; createInvoiceByMoyklassUserId skipped for user {}", moyklassUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
   }
 

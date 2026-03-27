@@ -11,11 +11,15 @@ public interface MoyKlassClient {
 
   MoyKlassResult getRemainingLessons(long maxUserId);
 
+  MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId);
+
   MoyKlassResult linkByPhone(long maxUserId, String phone);
 
   MoyKlassResult getProfileInfo(long maxUserId);
 
   MoyKlassResult createInvoice(long maxUserId);
+
+  MoyKlassResult createInvoiceByMoyklassUserId(long moyklassUserId);
 
   MoyKlassResult resolveMaxUserIdByPhone(String phone);
 
@@ -58,12 +62,14 @@ public interface MoyKlassClient {
     private final String name;
     private final String status;
     private final long filialId;
+    private final long courseId;
 
-    public ClassGroup(long id, String name, String status, long filialId) {
+    public ClassGroup(long id, String name, String status, long filialId, long courseId) {
       this.id = id;
       this.name = name;
       this.status = status;
       this.filialId = filialId;
+      this.courseId = courseId;
     }
 
     public long getId() {
@@ -80,6 +86,10 @@ public interface MoyKlassClient {
 
     public long getFilialId() {
       return filialId;
+    }
+
+    public long getCourseId() {
+      return courseId;
     }
   }
 

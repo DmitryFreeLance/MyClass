@@ -142,6 +142,11 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return MoyKlassResult.failure("Не найден профиль в МойКласс. Сначала нажмите \"Записаться\".");
     }
 
+    return getRemainingLessonsByMoyklassUserId(moyklassUserId);
+  }
+
+  @Override
+  public MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId) {
     try {
       String url = "/v1/company/userSubscriptions?userId=" + moyklassUserId + "&limit=200";
       JsonNode response = getJson(url);
@@ -152,6 +157,8 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
       int totalRemaining = 0;
       int computed = 0;
+      Map<Long, Long> classCourseMap = buildClassCourseMap();
+      Map<Long, String> courseNames = fetchCourseNames();
       Map<String, Integer> byCourse = new LinkedHashMap<>();
       boolean hasCourseNames = false;
       for (JsonNode sub : subs) {
@@ -168,11 +175,17 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           totalRemaining += remaining;
           computed++;
           String courseName = extractCourseName(sub);
+          if (courseName == null || courseName.isBlank()) {
+            long courseId = resolveCourseId(sub, classCourseMap);
+            if (courseId != 0) {
+              courseName = courseNames.get(courseId);
+            }
+            if (courseName == null || courseName.isBlank()) {
+              courseName = courseId != 0 ? "Курс #" + courseId : "Прочее";
+            }
+          }
           if (courseName != null && !courseName.isBlank()) {
             hasCourseNames = true;
-          } else {
-            long courseId = sub.path("courseId").asLong(0);
-            courseName = courseId > 0 ? "Курс #" + courseId : "Прочее";
           }
           byCourse.merge(courseName, remaining, Integer::sum);
         }
@@ -181,7 +194,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       if (computed == 0) {
         return MoyKlassResult.failure("Не удалось вычислить остаток занятий.");
       }
-      if (hasCourseNames || byCourse.size() > 1) {
+      if (!byCourse.isEmpty() && (hasCourseNames || byCourse.size() > 1)) {
         StringBuilder sb = new StringBuilder("Остаток занятий:");
         for (Map.Entry<String, Integer> entry : byCourse.entrySet()) {
           sb.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
@@ -205,11 +218,19 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       if (candidates.isEmpty()) {
         return MoyKlassResult.failure("По этому номеру клиент не найден.");
       }
-      if (candidates.size() > 1) {
-        return MoyKlassResult.failure("Найдено несколько клиентов по этому номеру. Уточните имя ребенка.");
+      List<MoyKlassUser> linked = new ArrayList<>();
+      for (UserCandidate candidate : candidates) {
+        MoyKlassResult linkResult = linkToMoyklassUser(maxUserId, candidate.id());
+        if (linkResult.isSuccess()) {
+          linked.add(new MoyKlassUser(candidate.id(), candidate.name(), null));
+        }
       }
-      long moyklassUserId = candidates.get(0).id();
-      return linkToMoyklassUser(maxUserId, moyklassUserId);
+      if (linked.isEmpty()) {
+        return MoyKlassResult.failure("Не удалось связать учетные записи.");
+      }
+      String data = objectMapper.writeValueAsString(linked);
+      String message = linked.size() > 1 ? "Найдены данные клиентов" : "Найдены данные клиента";
+      return MoyKlassResult.success(message, data);
     } catch (Exception e) {
       log.warn("Failed to link by phone: {}", e.getMessage());
       return MoyKlassResult.failure("Ошибка при поиске клиента по телефону.");
@@ -285,6 +306,11 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return MoyKlassResult.failure("Не найден профиль в МойКласс. Сначала нажмите \"Записаться\".");
     }
 
+    return createInvoiceByMoyklassUserId(moyklassUserId);
+  }
+
+  @Override
+  public MoyKlassResult createInvoiceByMoyklassUserId(long moyklassUserId) {
     try {
       JsonNode response = getJson("/v1/company/users/" + moyklassUserId + "?includePayLink=true");
       String payLinkKey = response.path("payLinkKey").asText("");
@@ -517,6 +543,62 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     return null;
   }
 
+  private Map<Long, Long> buildClassCourseMap() {
+    List<ClassGroup> classes = listClasses();
+    if (classes.isEmpty()) {
+      return Map.of();
+    }
+    Map<Long, Long> map = new LinkedHashMap<>();
+    for (ClassGroup group : classes) {
+      if (group.getId() > 0 && group.getCourseId() > 0) {
+        map.put(group.getId(), group.getCourseId());
+      }
+    }
+    return map;
+  }
+
+  private Map<Long, String> fetchCourseNames() {
+    try {
+      JsonNode response = getJson("/v1/company/courses");
+      JsonNode items = response.isArray() ? response : response.path("courses");
+      if (items == null || !items.isArray()) {
+        return Map.of();
+      }
+      Map<Long, String> map = new LinkedHashMap<>();
+      for (JsonNode node : items) {
+        long id = node.path("id").asLong(0);
+        String name = node.path("name").asText(null);
+        if (id != 0 && name != null && !name.isBlank()) {
+          map.put(id, name);
+        }
+      }
+      return map;
+    } catch (Exception e) {
+      log.warn("Failed to fetch courses: {}", e.getMessage());
+      return Map.of();
+    }
+  }
+
+  private long resolveCourseId(JsonNode sub, Map<Long, Long> classCourseMap) {
+    if (sub == null) {
+      return 0;
+    }
+    long classId = sub.path("mainClassId").asLong(0);
+    if (classId > 0) {
+      Long courseId = classCourseMap.get(classId);
+      if (courseId != null && courseId > 0) {
+        return courseId;
+      }
+    }
+    JsonNode courseIds = sub.path("courseIds");
+    if (courseIds.isArray() && courseIds.size() == 1) {
+      long single = courseIds.get(0).asLong(0);
+      return single > 0 ? single : 0;
+    }
+    long courseId = sub.path("courseId").asLong(0);
+    return courseId > 0 ? courseId : 0;
+  }
+
   private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
     if (phone == null || phone.isBlank()) {
       return null;
@@ -647,7 +729,8 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       String name = node.path("name").asText("");
       String status = node.path("status").asText("");
       long filialId = node.path("filialId").asLong(0);
-      result.add(new ClassGroup(id, name, status, filialId));
+      long courseId = node.path("courseId").asLong(0);
+      result.add(new ClassGroup(id, name, status, filialId, courseId));
     }
     return result;
   }

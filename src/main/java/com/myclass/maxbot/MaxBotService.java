@@ -257,13 +257,22 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
+    if (payload.startsWith("passes:")) {
+      handlePassesPayload(userId, payload);
+      return;
+    }
+    if (payload.startsWith("invoice:")) {
+      handleInvoicePayload(userId, payload);
+      return;
+    }
+
     switch (payload) {
       case "action:signup" -> promptSignupChoice(userId, false);
       case "action:children" -> showChildrenMenu(userId);
       case "action:add_child" -> promptSignupChoice(userId, true);
       case "action:link" -> startSignupPhoneFlow(userId);
-      case "action:passes" -> handleRemainingLessons(userId);
-      case "action:invoice" -> handleInvoice(userId);
+      case "action:passes" -> promptPassesTarget(userId);
+      case "action:invoice" -> promptInvoiceTarget(userId);
       case "action:menu" -> sendWelcome(userId);
       default -> log.debug("Unknown callback payload: {}", payload);
     }
@@ -388,12 +397,12 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     if (text.equalsIgnoreCase("Абонементы") || text.contains("Абон")) {
-      handleRemainingLessons(userId);
+      promptPassesTarget(userId);
       return;
     }
 
     if (text.equalsIgnoreCase("Счет на оплату") || text.contains("Счет")) {
-      handleInvoice(userId);
+      promptInvoiceTarget(userId);
       return;
     }
 
@@ -492,19 +501,8 @@ public class MaxBotService implements ApplicationRunner {
     MoyKlassResult result = moyKlassClient.linkByPhone(userId, text);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
-      rememberLinkedChild(userId, result, null);
+      rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
-      return;
-    }
-    if (containsMultipleClientsMessage(result.getMessage())) {
-      String digits = extractDigits(text);
-      try {
-        String data = objectMapper.writeValueAsString(Map.of("phone", digits));
-        userStateRepository.setState(userId, STATE_SIGNUP_NAME_EXISTING, data, Instant.now().toEpochMilli());
-      } catch (Exception e) {
-        log.warn("Failed to store signup phone for name selection: {}", e.getMessage());
-      }
-      sendUserMessage(userId, "По этому номеру найдено несколько клиентов. Введите ФИО ребенка.");
       return;
     }
     String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".";
@@ -530,7 +528,7 @@ public class MaxBotService implements ApplicationRunner {
     MoyKlassResult result = moyKlassClient.linkByPhoneAndName(userId, phone, childName);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
-      rememberLinkedChild(userId, result, childName);
+      rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
       return;
     }
@@ -681,17 +679,13 @@ public class MaxBotService implements ApplicationRunner {
 
   private void handleRemainingLessons(long userId) {
     MoyKlassResult result = moyKlassClient.getRemainingLessons(userId);
-    String response = result.isSuccess()
-        ? (result.getData() == null ? result.getMessage() : "Осталось занятий: " + result.getData())
-        : result.getMessage();
+    String response = formatRemainingResponse(result);
     sendMenuMessage(userId, response);
   }
 
   private void handleInvoice(long userId) {
     MoyKlassResult result = moyKlassClient.createInvoice(userId);
-    String response = result.isSuccess()
-        ? (result.getData() == null ? result.getMessage() : "Счет сформирован: " + result.getData())
-        : result.getMessage();
+    String response = formatInvoiceResponse(result);
     sendMenuMessage(userId, response);
   }
 
@@ -756,6 +750,130 @@ public class MaxBotService implements ApplicationRunner {
     } catch (Exception e) {
       log.warn("Failed to send main menu message to user {}: {}", userId, e.getMessage());
     }
+  }
+
+  private void promptPassesTarget(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Сначала свяжите учетные записи.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+    sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "passes"));
+  }
+
+  private void promptInvoiceTarget(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Сначала свяжите учетные записи.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+    sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "invoice"));
+  }
+
+  private void handlePassesPayload(long userId, String payload) {
+    if ("passes:all".equals(payload)) {
+      handlePassesForAll(userId);
+      return;
+    }
+    if (payload.startsWith("passes:child:")) {
+      long childId = parseLongSafe(payload.substring("passes:child:".length()));
+      if (childId > 0) {
+        handlePassesForChild(userId, childId);
+      }
+    }
+  }
+
+  private void handleInvoicePayload(long userId, String payload) {
+    if ("invoice:all".equals(payload)) {
+      handleInvoiceForAll(userId);
+      return;
+    }
+    if (payload.startsWith("invoice:child:")) {
+      long childId = parseLongSafe(payload.substring("invoice:child:".length()));
+      if (childId > 0) {
+        handleInvoiceForChild(userId, childId);
+      }
+    }
+  }
+
+  private void handlePassesForChild(long userId, long childId) {
+    Optional<UserChildRepository.UserChild> childOpt = userChildRepository.findChild(userId, childId);
+    if (childOpt.isEmpty()) {
+      sendUserMessage(userId, "Не удалось найти выбранного ребенка. Попробуйте снова.");
+      return;
+    }
+    MoyKlassResult result = moyKlassClient.getRemainingLessonsByMoyklassUserId(childId);
+    String name = childOpt.get().getChildName();
+    String response = formatRemainingResponse(result);
+    String message = (name == null || name.isBlank())
+        ? response
+        : "Ребенок: " + name + "\n" + response;
+    sendMenuMessage(userId, message);
+  }
+
+  private void handleInvoiceForChild(long userId, long childId) {
+    Optional<UserChildRepository.UserChild> childOpt = userChildRepository.findChild(userId, childId);
+    if (childOpt.isEmpty()) {
+      sendUserMessage(userId, "Не удалось найти выбранного ребенка. Попробуйте снова.");
+      return;
+    }
+    MoyKlassResult result = moyKlassClient.createInvoiceByMoyklassUserId(childId);
+    String name = childOpt.get().getChildName();
+    String response = formatInvoiceResponse(result);
+    String message = (name == null || name.isBlank())
+        ? response
+        : "Ребенок: " + name + "\n" + response;
+    sendMenuMessage(userId, message);
+  }
+
+  private void handlePassesForAll(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Сначала свяжите учетные записи.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+    StringBuilder sb = new StringBuilder("Остаток занятий (для всех):");
+    for (UserChildRepository.UserChild child : children) {
+      MoyKlassResult result = moyKlassClient.getRemainingLessonsByMoyklassUserId(child.getMoyklassUserId());
+      String name = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      sb.append("\n").append(name).append(": ").append(formatRemainingResponse(result));
+    }
+    sendMenuMessage(userId, sb.toString());
+  }
+
+  private void handleInvoiceForAll(long userId) {
+    List<UserChildRepository.UserChild> children = ensureChildrenLoaded(userId);
+    if (children.isEmpty()) {
+      sendUserMessageWithAttachments(
+          userId,
+          "Сначала свяжите учетные записи.",
+          keyboardFactory.linkAccountAttachments()
+      );
+      return;
+    }
+    StringBuilder sb = new StringBuilder("Счета на оплату (для всех):");
+    for (UserChildRepository.UserChild child : children) {
+      MoyKlassResult result = moyKlassClient.createInvoiceByMoyklassUserId(child.getMoyklassUserId());
+      String name = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      sb.append("\n").append(name).append(": ").append(formatInvoiceResponse(result));
+    }
+    sendMenuMessage(userId, sb.toString());
   }
 
   private void showChildrenMenu(long userId) {
@@ -885,15 +1003,21 @@ public class MaxBotService implements ApplicationRunner {
     return userChildRepository.listChildren(userId);
   }
 
-  private void rememberLinkedChild(long userId, MoyKlassResult result, String fallbackName) {
+  private void rememberLinkedChildren(long userId, MoyKlassResult result) {
     if (result == null || !result.isSuccess()) {
       return;
     }
-    long moyklassUserId = parseLongSafe(result.getData());
-    if (moyklassUserId <= 0) {
+    List<MoyKlassClient.MoyKlassUser> users = parseLinkedUsers(result.getData());
+    if (users.isEmpty()) {
+      long moyklassUserId = parseLongSafe(result.getData());
+      if (moyklassUserId > 0) {
+        rememberChild(userId, moyklassUserId, null);
+      }
       return;
     }
-    rememberChild(userId, moyklassUserId, fallbackName);
+    for (MoyKlassClient.MoyKlassUser user : users) {
+      rememberChild(userId, user.getId(), user.getName());
+    }
   }
 
   private void rememberChild(long userId, long moyklassUserId, String fallbackName) {
@@ -925,6 +1049,22 @@ public class MaxBotService implements ApplicationRunner {
     ));
   }
 
+  private List<Map<String, Object>> buildTargetAttachments(List<UserChildRepository.UserChild> children, String prefix) {
+    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
+    for (UserChildRepository.UserChild child : children) {
+      String label = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      rows.add(List.of(callbackButton(label, prefix + ":child:" + child.getMoyklassUserId())));
+    }
+    rows.add(List.of(callbackButton("Для всех", prefix + ":all")));
+    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
   private Map<String, Object> callbackButton(String text, String payload) {
     return Map.of(
         "type", "callback",
@@ -939,6 +1079,50 @@ public class MaxBotService implements ApplicationRunner {
     }
     String value = text.trim();
     return value.isBlank() ? null : value;
+  }
+
+  private String formatRemainingResponse(MoyKlassResult result) {
+    if (result == null) {
+      return "Не удалось получить данные.";
+    }
+    if (!result.isSuccess()) {
+      return result.getMessage();
+    }
+    return result.getData() == null ? result.getMessage() : "Осталось занятий: " + result.getData();
+  }
+
+  private String formatInvoiceResponse(MoyKlassResult result) {
+    if (result == null) {
+      return "Не удалось получить счет.";
+    }
+    if (!result.isSuccess()) {
+      return result.getMessage();
+    }
+    return result.getData() == null ? result.getMessage() : "Счет сформирован: " + result.getData();
+  }
+
+  private List<MoyKlassClient.MoyKlassUser> parseLinkedUsers(String data) {
+    if (data == null || data.isBlank()) {
+      return List.of();
+    }
+    try {
+      JsonNode node = objectMapper.readTree(data);
+      if (node != null && node.isArray()) {
+        List<MoyKlassClient.MoyKlassUser> result = new java.util.ArrayList<>();
+        for (JsonNode item : node) {
+          long id = item.path("id").asLong(0);
+          if (id <= 0) {
+            continue;
+          }
+          String name = item.path("name").asText(null);
+          result.add(new MoyKlassClient.MoyKlassUser(id, name, null));
+        }
+        return result;
+      }
+      return List.of();
+    } catch (Exception e) {
+      return List.of();
+    }
   }
 
   private SignupData getSignupData(long userId) {
