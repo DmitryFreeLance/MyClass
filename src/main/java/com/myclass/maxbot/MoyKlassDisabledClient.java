@@ -43,6 +43,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public RemainingDetails getRemainingDetailsByMoyklassUserId(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; getRemainingDetailsByMoyklassUserId skipped for user {}", moyklassUserId);
+    return new RemainingDetails(java.util.List.of(), 0);
+  }
+
+  @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
     log.warn("MoyKlass integration disabled; linkByPhone skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");

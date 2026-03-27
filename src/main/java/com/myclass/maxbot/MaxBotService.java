@@ -810,9 +810,9 @@ public class MaxBotService implements ApplicationRunner {
       sendUserMessage(userId, "Не удалось найти выбранного ребенка. Попробуйте снова.");
       return;
     }
-    MoyKlassResult result = moyKlassClient.getRemainingLessonsByMoyklassUserId(childId);
     String name = childOpt.get().getChildName();
-    String response = formatRemainingResponse(result);
+    MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(childId);
+    String response = formatRemainingDetails(details);
     String message = (name == null || name.isBlank())
         ? response
         : "Ребенок: " + name + "\n" + response;
@@ -844,13 +844,13 @@ public class MaxBotService implements ApplicationRunner {
       );
       return;
     }
-    StringBuilder sb = new StringBuilder("Остаток занятий (для всех):");
+    StringBuilder sb = new StringBuilder("📚 Остаток занятий (для всех):");
     for (UserChildRepository.UserChild child : children) {
-      MoyKlassResult result = moyKlassClient.getRemainingLessonsByMoyklassUserId(child.getMoyklassUserId());
       String name = child.getChildName() == null || child.getChildName().isBlank()
           ? "Ребенок " + child.getMoyklassUserId()
           : child.getChildName();
-      sb.append("\n").append(name).append(": ").append(formatRemainingResponse(result));
+      MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(child.getMoyklassUserId());
+      sb.append("\n").append(name).append(":\n").append(formatRemainingDetails(details));
     }
     sendMenuMessage(userId, sb.toString());
   }
@@ -887,7 +887,14 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
-    sendUserMessageWithAttachments(userId, "Выберите ребенка:", buildChildrenAttachments(children));
+    StringBuilder sb = new StringBuilder("Связанные дети:");
+    for (UserChildRepository.UserChild child : children) {
+      String name = child.getChildName() == null || child.getChildName().isBlank()
+          ? "Ребенок " + child.getMoyklassUserId()
+          : child.getChildName();
+      sb.append("\n• ").append(name);
+    }
+    sendUserMessageWithAttachments(userId, sb.toString(), buildChildrenAttachments(children));
   }
 
   private void handleChildSelect(long userId, long childId) {
@@ -1035,12 +1042,6 @@ public class MaxBotService implements ApplicationRunner {
 
   private List<Map<String, Object>> buildChildrenAttachments(List<UserChildRepository.UserChild> children) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
-    for (UserChildRepository.UserChild child : children) {
-      String label = child.getChildName() == null || child.getChildName().isBlank()
-          ? "Ребенок " + child.getMoyklassUserId()
-          : child.getChildName();
-      rows.add(List.of(callbackButton(label, "child:select:" + child.getMoyklassUserId())));
-    }
     rows.add(List.of(callbackButton("➕ Добавить ребенка", "action:add_child")));
     rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
@@ -1089,6 +1090,40 @@ public class MaxBotService implements ApplicationRunner {
       return result.getMessage();
     }
     return result.getData() == null ? result.getMessage() : "Осталось занятий: " + result.getData();
+  }
+
+  private String formatRemainingDetails(MoyKlassClient.RemainingDetails details) {
+    if (details == null) {
+      return "Не удалось получить данные.";
+    }
+    List<MoyKlassClient.RemainingItem> items = details.getItems();
+    if (items == null || items.isEmpty()) {
+      return "Остаток занятий: " + details.getTotal();
+    }
+    StringBuilder sb = new StringBuilder("📚 Остаток занятий:");
+    for (MoyKlassClient.RemainingItem item : items) {
+      String course = item.getCourseName() == null ? "Прочее" : item.getCourseName();
+      String className = item.getClassName();
+      String label = className == null || className.isBlank()
+          ? course
+          : course + " — " + className;
+      sb.append("\n").append(emojiForCourse(course)).append(" ").append(label).append(": ").append(item.getRemaining());
+    }
+    return sb.toString();
+  }
+
+  private String emojiForCourse(String course) {
+    if (course == null) {
+      return "📚";
+    }
+    String normalized = course.toLowerCase();
+    if (normalized.contains("англий")) {
+      return "🇬🇧";
+    }
+    if (normalized.contains("твор")) {
+      return "🎨";
+    }
+    return "📚";
   }
 
   private String formatInvoiceResponse(MoyKlassResult result) {

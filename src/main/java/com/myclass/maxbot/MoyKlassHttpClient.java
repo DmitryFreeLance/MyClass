@@ -147,20 +147,36 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
   @Override
   public MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId) {
+    RemainingDetails details = getRemainingDetailsByMoyklassUserId(moyklassUserId);
+    if (details.getItems().isEmpty()) {
+      return MoyKlassResult.success("Остаток занятий", String.valueOf(details.getTotal()));
+    }
+    StringBuilder sb = new StringBuilder("Остаток занятий:");
+    for (RemainingItem item : details.getItems()) {
+      sb.append("\n").append(item.getCourseName());
+      if (item.getClassName() != null && !item.getClassName().isBlank()) {
+        sb.append(" — ").append(item.getClassName());
+      }
+      sb.append(": ").append(item.getRemaining());
+    }
+    return MoyKlassResult.success(sb.toString(), null);
+  }
+
+  @Override
+  public RemainingDetails getRemainingDetailsByMoyklassUserId(long moyklassUserId) {
     try {
       String url = "/v1/company/userSubscriptions?userId=" + moyklassUserId + "&limit=200";
       JsonNode response = getJson(url);
       JsonNode subs = response.path("subscriptions");
       if (!subs.isArray() || subs.isEmpty()) {
-        return MoyKlassResult.success("Абонементы не найдены", "0");
+        return new RemainingDetails(List.of(), 0);
       }
 
       int totalRemaining = 0;
       int computed = 0;
-      Map<Long, Long> classCourseMap = buildClassCourseMap();
+      Map<Long, ClassGroup> classMap = buildClassMap();
       Map<Long, String> courseNames = fetchCourseNames();
-      Map<String, Integer> byCourse = new LinkedHashMap<>();
-      boolean hasCourseNames = false;
+      Map<String, RemainingItem> byKey = new LinkedHashMap<>();
       for (JsonNode sub : subs) {
         int visitCount = sub.path("visitCount").asInt(-1);
         double visited = -1;
@@ -174,37 +190,40 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           int remaining = (int) Math.max(visitCount - Math.round(visited), 0);
           totalRemaining += remaining;
           computed++;
-          String courseName = extractCourseName(sub);
-          if (courseName == null || courseName.isBlank()) {
-            long courseId = resolveCourseId(sub, classCourseMap);
-            if (courseId != 0) {
-              courseName = courseNames.get(courseId);
-            }
-            if (courseName == null || courseName.isBlank()) {
-              courseName = courseId != 0 ? "Курс #" + courseId : "Прочее";
-            }
+          if (remaining <= 0) {
+            continue;
           }
-          if (courseName != null && !courseName.isBlank()) {
-            hasCourseNames = true;
+          long classId = sub.path("mainClassId").asLong(0);
+          ClassGroup group = classMap.get(classId);
+          long courseId = resolveCourseId(sub, classMap);
+          String courseName = resolveCourseName(sub, courseId, courseNames);
+          String className = group == null ? null : group.getName();
+
+          String key = (courseName == null ? "Прочее" : courseName) + "|" + (className == null ? "" : className);
+          RemainingItem existing = byKey.get(key);
+          if (existing == null) {
+            byKey.put(key, new RemainingItem(
+                courseName == null ? "Прочее" : courseName,
+                className,
+                remaining
+            ));
+          } else {
+            byKey.put(key, new RemainingItem(
+                existing.getCourseName(),
+                existing.getClassName(),
+                existing.getRemaining() + remaining
+            ));
           }
-          byCourse.merge(courseName, remaining, Integer::sum);
         }
       }
 
       if (computed == 0) {
-        return MoyKlassResult.failure("Не удалось вычислить остаток занятий.");
+        return new RemainingDetails(List.of(), 0);
       }
-      if (!byCourse.isEmpty() && (hasCourseNames || byCourse.size() > 1)) {
-        StringBuilder sb = new StringBuilder("Остаток занятий:");
-        for (Map.Entry<String, Integer> entry : byCourse.entrySet()) {
-          sb.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
-        }
-        return MoyKlassResult.success(sb.toString(), null);
-      }
-      return MoyKlassResult.success("Остаток занятий", String.valueOf(totalRemaining));
+      return new RemainingDetails(new ArrayList<>(byKey.values()), totalRemaining);
     } catch (Exception e) {
       log.warn("Failed to fetch subscriptions: {}", e.getMessage());
-      return MoyKlassResult.failure("Ошибка при запросе абонементов.");
+      return new RemainingDetails(List.of(), 0);
     }
   }
 
@@ -543,15 +562,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     return null;
   }
 
-  private Map<Long, Long> buildClassCourseMap() {
+  private Map<Long, ClassGroup> buildClassMap() {
     List<ClassGroup> classes = listClasses();
     if (classes.isEmpty()) {
       return Map.of();
     }
-    Map<Long, Long> map = new LinkedHashMap<>();
+    Map<Long, ClassGroup> map = new LinkedHashMap<>();
     for (ClassGroup group : classes) {
-      if (group.getId() > 0 && group.getCourseId() > 0) {
-        map.put(group.getId(), group.getCourseId());
+      if (group.getId() > 0) {
+        map.put(group.getId(), group);
       }
     }
     return map;
@@ -579,15 +598,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
   }
 
-  private long resolveCourseId(JsonNode sub, Map<Long, Long> classCourseMap) {
+  private long resolveCourseId(JsonNode sub, Map<Long, ClassGroup> classMap) {
     if (sub == null) {
       return 0;
     }
     long classId = sub.path("mainClassId").asLong(0);
     if (classId > 0) {
-      Long courseId = classCourseMap.get(classId);
-      if (courseId != null && courseId > 0) {
-        return courseId;
+      ClassGroup group = classMap.get(classId);
+      if (group != null && group.getCourseId() > 0) {
+        return group.getCourseId();
       }
     }
     JsonNode courseIds = sub.path("courseIds");
@@ -597,6 +616,20 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
     long courseId = sub.path("courseId").asLong(0);
     return courseId > 0 ? courseId : 0;
+  }
+
+  private String resolveCourseName(JsonNode sub, long courseId, Map<Long, String> courseNames) {
+    String courseName = extractCourseName(sub);
+    if (courseName != null && !courseName.isBlank()) {
+      return courseName;
+    }
+    if (courseId != 0) {
+      courseName = courseNames.get(courseId);
+    }
+    if (courseName == null || courseName.isBlank()) {
+      courseName = courseId != 0 ? "Курс #" + courseId : "Прочее";
+    }
+    return courseName;
   }
 
   private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
