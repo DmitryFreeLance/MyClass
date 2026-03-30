@@ -7,11 +7,8 @@ import java.util.Map;
 public class KeyboardFactory {
   public List<Map<String, Object>> mainMenuAttachments(boolean linked) {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    if (linked) {
-      rows.add(List.of(button("callback", "👨‍👩‍👧 Мои дети", "action:children")));
-    } else {
-      rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
-    }
+    rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
+    rows.add(List.of(button("callback", "🔐 Авторизоваться", "action:auth")));
     rows.add(List.of(button("callback", "🎟️ Абонементы", "action:passes")));
     rows.add(List.of(button("callback", "💳 Счет на оплату", "action:invoice")));
     rows.add(List.of(linkButton("💬 Написать в чат", "https://max.ru/u/f9LHodD0cOI1bQhXnFdFq9sJL6NGD_9AD2zjkNxHcHNh0Om0GOo-RQYznQE")));

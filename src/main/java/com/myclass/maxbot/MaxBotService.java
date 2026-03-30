@@ -274,9 +274,10 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     switch (payload) {
-      case "action:signup" -> promptSignupChoice(userId, false);
+      case "action:signup" -> handleNewSignupRedirect(userId);
       case "action:children" -> showChildrenMenu(userId);
-      case "action:add_child" -> promptSignupChoice(userId, true);
+      case "action:add_child" -> startSignupPhoneFlow(userId);
+      case "action:auth" -> startSignupPhoneFlow(userId);
       case "action:remove_child" -> showRemoveChildMenu(userId);
       case "action:link" -> startSignupPhoneFlow(userId);
       case "action:passes" -> promptPassesTarget(userId);
@@ -400,7 +401,12 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     if (text.equalsIgnoreCase("Записаться") || text.contains("Запис")) {
-      promptSignupChoice(userId, hasLinkedChildren(userId));
+      handleNewSignupRedirect(userId);
+      return;
+    }
+
+    if (text.equalsIgnoreCase("Авторизоваться") || text.contains("Авториз")) {
+      startSignupPhoneFlow(userId);
       return;
     }
 
@@ -411,11 +417,6 @@ public class MaxBotService implements ApplicationRunner {
 
     if (text.equalsIgnoreCase("Счет на оплату") || text.contains("Счет")) {
       promptInvoiceTarget(userId);
-      return;
-    }
-
-    if (text.equalsIgnoreCase("Мои дети") || text.contains("дет")) {
-      showChildrenMenu(userId);
       return;
     }
 
@@ -491,7 +492,7 @@ public class MaxBotService implements ApplicationRunner {
 
   private void startSignupPhoneFlow(long userId) {
     userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
-    sendUserMessage(userId, "Введите номер телефона, который использовали при регистрации или оплате (только цифры).");
+    sendUserMessage(userId, "Введите номер телефона, который использовали при записи ребенка\n<b>Только цифры</b>");
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
