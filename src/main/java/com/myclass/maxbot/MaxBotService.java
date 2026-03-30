@@ -492,7 +492,7 @@ public class MaxBotService implements ApplicationRunner {
 
   private void startSignupPhoneFlow(long userId) {
     userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
-    sendUserMessage(userId, "Введите номер телефона, который использовали при записи ребенка\n<b>Только цифры</b>");
+    sendUserMessage(userId, "Введите номер телефона, который использовали при записи ребенка\n(Только цифры)");
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
@@ -760,6 +760,10 @@ public class MaxBotService implements ApplicationRunner {
       );
       return;
     }
+    if (children.size() == 1) {
+      handlePassesForChild(userId, children.get(0).getMoyklassUserId());
+      return;
+    }
     sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "passes"));
   }
 
@@ -771,6 +775,10 @@ public class MaxBotService implements ApplicationRunner {
           "Сначала свяжите учетные записи.",
           keyboardFactory.linkAccountAttachments()
       );
+      return;
+    }
+    if (children.size() == 1) {
+      handleInvoiceForChild(userId, children.get(0).getMoyklassUserId());
       return;
     }
     sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "invoice"));
@@ -843,11 +851,16 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
     StringBuilder sb = new StringBuilder("📚 Остаток занятий (для всех):");
+    boolean first = true;
     for (UserChildRepository.UserChild child : children) {
       String name = child.getChildName() == null || child.getChildName().isBlank()
           ? "Ребенок " + child.getMoyklassUserId()
           : child.getChildName();
       MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(child.getMoyklassUserId());
+      if (!first) {
+        sb.append("\n");
+      }
+      first = false;
       sb.append("\n").append(name).append(":\n").append(formatRemainingDetails(details));
     }
     sendMenuMessage(userId, sb.toString());
@@ -864,11 +877,16 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
     StringBuilder sb = new StringBuilder("Счета на оплату (для всех):");
+    boolean first = true;
     for (UserChildRepository.UserChild child : children) {
       MoyKlassResult result = moyKlassClient.createInvoiceByMoyklassUserId(child.getMoyklassUserId());
       String name = child.getChildName() == null || child.getChildName().isBlank()
           ? "Ребенок " + child.getMoyklassUserId()
           : child.getChildName();
+      if (!first) {
+        sb.append("\n");
+      }
+      first = false;
       sb.append("\n").append(name).append(": ").append(formatInvoiceResponse(result));
     }
     sendMenuMessage(userId, sb.toString());
