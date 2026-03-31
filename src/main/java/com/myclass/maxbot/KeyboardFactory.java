@@ -65,7 +65,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> linkAccountAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "Связать", "action:link")));
+    rows.add(List.of(button("callback", "Авторизоваться", "action:link")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -75,7 +75,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> scheduleLinkAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(linkButton("Зарегистрироваться", "https://дкразвитие.рф/schedule.html")));
+    rows.add(List.of(linkButton("Записаться", "https://дкразвитие.рф/schedule.html")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",

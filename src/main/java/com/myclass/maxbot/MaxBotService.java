@@ -467,7 +467,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendScheduleMessage(long userId) {
-    String text = "Для регистрации перейдите по ссылке: " + SCHEDULE_URL;
+    String text = "Для записи на занятия по английскому языку/творчеству перейдите по ссылке\n(кнопка «Записаться»)";
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
@@ -479,7 +479,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendLinkAccountPrompt(long userId) {
-    String text = "После успешной регистрации необходимо связать учетные записи.";
+    String text = "После успешной записи необходимо авторизоваться";
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
@@ -755,7 +755,7 @@ public class MaxBotService implements ApplicationRunner {
     if (children.isEmpty()) {
       sendUserMessageWithAttachments(
           userId,
-          "Сначала свяжите учетные записи.",
+          "Для получени информации нужно авторизоваться",
           keyboardFactory.linkAccountAttachments()
       );
       return;
@@ -772,7 +772,7 @@ public class MaxBotService implements ApplicationRunner {
     if (children.isEmpty()) {
       sendUserMessageWithAttachments(
           userId,
-          "Сначала свяжите учетные записи.",
+          "Для получени информации нужно авторизоваться",
           keyboardFactory.linkAccountAttachments()
       );
       return;
@@ -845,7 +845,7 @@ public class MaxBotService implements ApplicationRunner {
     if (children.isEmpty()) {
       sendUserMessageWithAttachments(
           userId,
-          "Сначала свяжите учетные записи.",
+          "Для получени информации нужно авторизоваться",
           keyboardFactory.linkAccountAttachments()
       );
       return;
@@ -871,7 +871,7 @@ public class MaxBotService implements ApplicationRunner {
     if (children.isEmpty()) {
       sendUserMessageWithAttachments(
           userId,
-          "Сначала свяжите учетные записи.",
+          "Для получени информации нужно авторизоваться",
           keyboardFactory.linkAccountAttachments()
       );
       return;
