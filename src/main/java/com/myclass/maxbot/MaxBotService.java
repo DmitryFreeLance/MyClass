@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +41,8 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
   private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
+  private static final long MARKER_RESET_AFTER_MS = 3 * 60 * 1000L;
+  private static final long MARKER_RESET_COOLDOWN_MS = 10 * 60 * 1000L;
   private static final long NOTIFY_LESSONS_INTERVAL_SEC = 60;
   private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 30;
   private static final long REFERENCE_CACHE_TTL_MS = 60 * 60 * 1000L;
@@ -63,6 +66,11 @@ public class MaxBotService implements ApplicationRunner {
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private final long bootId = System.currentTimeMillis();
   private volatile boolean running = true;
+  private volatile long lastUpdateAt = System.currentTimeMillis();
+  private volatile Long lastMarkerValue = null;
+  private volatile long lastMarkerChangeAt = System.currentTimeMillis();
+  private volatile long lastMarkerResetAt = 0L;
+  private volatile long lastHeartbeatAt = 0L;
   private volatile Map<Long, MoyKlassClient.ClassGroup> classCache = Map.of();
   private volatile Map<Long, String> courseCache = Map.of();
   private volatile long classCacheUpdatedAt = 0;
@@ -129,6 +137,10 @@ public class MaxBotService implements ApplicationRunner {
 
   private void pollLoop() {
     Long marker = botStateRepository.get(STATE_MARKER).map(Long::parseLong).orElse(null);
+    if (marker != null) {
+      lastMarkerValue = marker;
+      lastMarkerChangeAt = System.currentTimeMillis();
+    }
 
     while (running) {
       try {
@@ -140,9 +152,11 @@ public class MaxBotService implements ApplicationRunner {
         );
 
         JsonNode updates = response.path("updates");
+        int updatesCount = 0;
         if (updates.isArray()) {
           for (JsonNode update : updates) {
             handleUpdate(update);
+            updatesCount++;
           }
         }
 
@@ -150,11 +164,49 @@ public class MaxBotService implements ApplicationRunner {
           marker = response.get("marker").asLong();
           botStateRepository.set(STATE_MARKER, String.valueOf(marker));
         }
+
+        logLongPollHeartbeat(marker, updatesCount);
+        marker = maybeResetMarker(marker, updatesCount);
       } catch (Exception e) {
         log.warn("Error in long polling loop: {}", e.getMessage());
         sleepQuietly(2000);
       }
     }
+  }
+
+  private void logLongPollHeartbeat(Long marker, int updatesCount) {
+    long now = System.currentTimeMillis();
+    if (now - lastHeartbeatAt < 60_000L) {
+      return;
+    }
+    lastHeartbeatAt = now;
+    String markerText = marker == null ? "null" : String.valueOf(marker);
+    log.info("Long-poll heartbeat: marker={}, updatesLastPoll={}", markerText, updatesCount);
+  }
+
+  private Long maybeResetMarker(Long marker, int updatesCount) {
+    long now = System.currentTimeMillis();
+    if (updatesCount > 0) {
+      lastUpdateAt = now;
+    }
+    if (marker != null) {
+      if (lastMarkerValue == null || !marker.equals(lastMarkerValue)) {
+        lastMarkerValue = marker;
+        lastMarkerChangeAt = now;
+      }
+    }
+    boolean noUpdatesTooLong = now - lastUpdateAt > MARKER_RESET_AFTER_MS;
+    boolean markerStale = now - lastMarkerChangeAt > MARKER_RESET_AFTER_MS;
+    boolean cooldownPassed = now - lastMarkerResetAt > MARKER_RESET_COOLDOWN_MS;
+    if (noUpdatesTooLong && markerStale && cooldownPassed) {
+      log.warn("No updates for {} ms and marker stale; resetting marker.", MARKER_RESET_AFTER_MS);
+      botStateRepository.delete(STATE_MARKER);
+      lastMarkerResetAt = now;
+      lastMarkerValue = null;
+      lastMarkerChangeAt = now;
+      return null;
+    }
+    return marker;
   }
 
   private void pollNotifications() {
@@ -332,14 +384,27 @@ public class MaxBotService implements ApplicationRunner {
     String courseName = resolveCourseName(group, courseMap);
     MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(event.getUserId());
     int remaining = findRemainingFor(details, courseName, className);
-    String remainingText = remaining >= 0
-        ? String.valueOf(remaining)
-        : String.valueOf(details != null ? details.getTotal() : 0);
-    String message = "У вас прошло занятие: " + courseName + " - " + className
-        + "\nОстаток занятий: " + remainingText;
+    int remainingCount = remaining >= 0
+        ? remaining
+        : (details != null ? details.getTotal() : -1);
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
-        sendUserMessage(maxUserId, message);
+        StringBuilder message = new StringBuilder("У вас прошло занятие: ")
+            .append(courseName)
+            .append(" - ")
+            .append(className);
+        if (remainingCount == 1) {
+          String childName = resolveChildName(maxUserId, event.getUserId());
+          String program = formatProgramLabel(courseName, className);
+          message.append("\n")
+              .append("У вашего ребёнка ")
+              .append(childName)
+              .append(" осталось 1 оплаченное занятие по ")
+              .append(program)
+              .append(".\nПожалуйста, не забудьте приобрести новый абонемент.")
+              .append("\n(Абонементы бессрочные)");
+        }
+        sendUserMessage(maxUserId, message.toString());
       }
     }
   }
@@ -352,11 +417,13 @@ public class MaxBotService implements ApplicationRunner {
     if (maxUserIds.isEmpty()) {
       return;
     }
-    MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(event.getUserId());
-    String remainingText = formatPaymentRemaining(details);
-    String message = "Благодарим за оплату.\nВаш остаток занятий:\n" + remainingText;
+    String amountText = formatAmount(event.getAmount());
+    String program = formatProgramLabel(event.getComment());
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
+        String childName = resolveChildName(maxUserId, event.getUserId());
+        String message = "Спасибо!\nВаш платеж на сумму " + amountText
+            + " руб. по программе " + program + " за ребенка " + childName + " был получен.";
         sendUserMessage(maxUserId, message);
       }
     }
@@ -443,6 +510,43 @@ public class MaxBotService implements ApplicationRunner {
       sb.append(label).append(": ").append(item.getRemaining());
     }
     return sb.toString();
+  }
+
+  private String resolveChildName(long maxUserId, long moyklassUserId) {
+    return userChildRepository.findChild(maxUserId, moyklassUserId)
+        .map(UserChildRepository.UserChild::getChildName)
+        .filter(name -> name != null && !name.isBlank())
+        .orElse("Ребенок " + moyklassUserId);
+  }
+
+  private String formatProgramLabel(String comment) {
+    String value = comment == null ? "" : comment.trim();
+    if (value.isBlank()) {
+      return "Без программы";
+    }
+    return value;
+  }
+
+  private String formatProgramLabel(String courseName, String className) {
+    String course = courseName == null ? "" : courseName.trim();
+    String clazz = className == null ? "" : className.trim();
+    if (course.isBlank() && clazz.isBlank()) {
+      return "Без программы";
+    }
+    if (clazz.isBlank()) {
+      return course;
+    }
+    if (course.isBlank()) {
+      return clazz;
+    }
+    return course + " - " + clazz;
+  }
+
+  private String formatAmount(double amount) {
+    if (Math.abs(amount - Math.rint(amount)) < 0.01) {
+      return String.valueOf(Math.round(amount));
+    }
+    return String.format(Locale.US, "%.2f", amount).replace('.', ',');
   }
 
   private void handleUpdate(JsonNode update) {

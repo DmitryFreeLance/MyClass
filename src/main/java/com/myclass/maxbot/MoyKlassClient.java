@@ -258,12 +258,14 @@ public interface MoyKlassClient {
     private final long userId;
     private final double amount;
     private final Long userSubscriptionId;
+    private final String comment;
 
-    public PaymentEvent(long id, long userId, double amount, Long userSubscriptionId) {
+    public PaymentEvent(long id, long userId, double amount, Long userSubscriptionId, String comment) {
       this.id = id;
       this.userId = userId;
       this.amount = amount;
       this.userSubscriptionId = userSubscriptionId;
+      this.comment = comment;
     }
 
     public long getId() {
@@ -280,6 +282,10 @@ public interface MoyKlassClient {
 
     public Long getUserSubscriptionId() {
       return userSubscriptionId;
+    }
+
+    public String getComment() {
+      return comment;
     }
   }
 }

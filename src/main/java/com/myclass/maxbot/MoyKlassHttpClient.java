@@ -739,8 +739,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           double amount = node.path("summa").asDouble(0);
           long subIdRaw = node.path("userSubscriptionId").asLong(0);
           Long subId = subIdRaw > 0 ? subIdRaw : null;
+          String comment = node.path("comment").asText(null);
           if (id > 0 && userId > 0) {
-            result.add(new PaymentEvent(id, userId, amount, subId));
+            result.add(new PaymentEvent(id, userId, amount, subId, comment));
           }
         }
         if (items.size() < limit) {
@@ -787,8 +788,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
         double amount = node.path("summa").asDouble(0);
         long subIdRaw = node.path("userSubscriptionId").asLong(0);
         Long subId = subIdRaw > 0 ? subIdRaw : null;
+        String comment = node.path("comment").asText(null);
         if (id > 0 && userId > 0) {
-          result.add(new PaymentEvent(id, userId, amount, subId));
+          result.add(new PaymentEvent(id, userId, amount, subId, comment));
         }
       }
     } catch (Exception e) {
