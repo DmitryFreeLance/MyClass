@@ -803,7 +803,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     try {
       java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.systemDefault());
       java.time.LocalDate from = today.minusDays(Math.max(1, days));
-      return "&date=" + from + "," + today;
+      return "&date=" + from + "&date=" + today;
     } catch (Exception e) {
       return "";
     }
