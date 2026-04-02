@@ -40,7 +40,8 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
   private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
-  private static final long NOTIFY_POLL_INTERVAL_SEC = 60;
+  private static final long NOTIFY_LESSONS_INTERVAL_SEC = 60;
+  private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 30;
   private static final long REFERENCE_CACHE_TTL_MS = 60 * 60 * 1000L;
 
   private final BotProperties properties;
@@ -112,7 +113,10 @@ public class MaxBotService implements ApplicationRunner {
     executor.submit(this::pollLoop);
     if (properties.getMoyklass().isEnabled() && properties.getMoyklass().getToken() != null
         && !properties.getMoyklass().getToken().isBlank()) {
-      scheduler.scheduleAtFixedRate(this::pollNotifications, 10, NOTIFY_POLL_INTERVAL_SEC, TimeUnit.SECONDS);
+      scheduler.scheduleAtFixedRate(this::pollLessonNotifications, 10,
+          NOTIFY_LESSONS_INTERVAL_SEC, TimeUnit.SECONDS);
+      scheduler.scheduleAtFixedRate(this::pollPaymentNotifications, 10,
+          NOTIFY_PAYMENTS_INTERVAL_SEC, TimeUnit.SECONDS);
     }
   }
 
