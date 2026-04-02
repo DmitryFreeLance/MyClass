@@ -793,6 +793,7 @@ public class MaxBotService implements ApplicationRunner {
   private List<Map<String, Object>> buildAdminMenuAttachments() {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
     rows.add(List.of(callbackButton("Изменить текст", "admin:text:menu")));
+    rows.add(List.of(callbackButton("В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",
         "payload", Map.of("buttons", rows)
