@@ -7,6 +7,8 @@ public interface MoyKlassClient {
 
   java.util.List<ClassGroup> listClasses();
 
+  java.util.List<Course> listCourses();
+
   MoyKlassUser getUserInfo(long moyklassUserId);
 
   MoyKlassResult getRemainingLessons(long maxUserId);
@@ -28,6 +30,10 @@ public interface MoyKlassClient {
   MoyKlassResult resolveMaxUserIdByPhoneAndName(String phone, String childName);
 
   MoyKlassResult linkByPhoneAndName(long maxUserId, String phone, String childName);
+
+  java.util.List<LessonRecordEvent> listVisitedLessonRecords(long sinceId);
+
+  java.util.List<PaymentEvent> listIncomingPayments(long sinceId);
 
   class Filial {
     private final long id;
@@ -92,6 +98,24 @@ public interface MoyKlassClient {
 
     public long getCourseId() {
       return courseId;
+    }
+  }
+
+  class Course {
+    private final long id;
+    private final String name;
+
+    public Course(long id, String name) {
+      this.id = id;
+      this.name = name;
+    }
+
+    public long getId() {
+      return id;
+    }
+
+    public String getName() {
+      return name;
     }
   }
 
@@ -194,6 +218,66 @@ public interface MoyKlassClient {
 
     public int getRemaining() {
       return remaining;
+    }
+  }
+
+  class LessonRecordEvent {
+    private final long id;
+    private final long userId;
+    private final long lessonId;
+    private final long classId;
+
+    public LessonRecordEvent(long id, long userId, long lessonId, long classId) {
+      this.id = id;
+      this.userId = userId;
+      this.lessonId = lessonId;
+      this.classId = classId;
+    }
+
+    public long getId() {
+      return id;
+    }
+
+    public long getUserId() {
+      return userId;
+    }
+
+    public long getLessonId() {
+      return lessonId;
+    }
+
+    public long getClassId() {
+      return classId;
+    }
+  }
+
+  class PaymentEvent {
+    private final long id;
+    private final long userId;
+    private final double amount;
+    private final Long userSubscriptionId;
+
+    public PaymentEvent(long id, long userId, double amount, Long userSubscriptionId) {
+      this.id = id;
+      this.userId = userId;
+      this.amount = amount;
+      this.userSubscriptionId = userSubscriptionId;
+    }
+
+    public long getId() {
+      return id;
+    }
+
+    public long getUserId() {
+      return userId;
+    }
+
+    public double getAmount() {
+      return amount;
+    }
+
+    public Long getUserSubscriptionId() {
+      return userSubscriptionId;
     }
   }
 }

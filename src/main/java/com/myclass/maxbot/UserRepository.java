@@ -58,6 +58,31 @@ public class UserRepository {
     );
   }
 
+  public int countUsers() {
+    Integer count = jdbcTemplate.query(
+        "SELECT COUNT(1) AS cnt FROM users",
+        rs -> rs.next() ? rs.getInt("cnt") : 0
+    );
+    return count == null ? 0 : count;
+  }
+
+  public List<UserRecord> listUsersPage(int offset, int limit) {
+    return jdbcTemplate.query(
+        "SELECT id, max_user_id, moyklass_user_id, first_name, last_name, username, last_seen " +
+            "FROM users ORDER BY last_seen DESC LIMIT ? OFFSET ?",
+        (rs, rowNum) -> new UserRecord(
+            rs.getLong("id"),
+            rs.getLong("max_user_id"),
+            rs.getObject("moyklass_user_id") != null ? rs.getLong("moyklass_user_id") : null,
+            rs.getString("first_name"),
+            rs.getString("last_name"),
+            rs.getString("username"),
+            rs.getLong("last_seen")
+        ),
+        limit, offset
+    );
+  }
+
   public void setMoyklassUserId(long maxUserId, long moyklassUserId) {
     jdbcTemplate.update(
         "UPDATE users SET moyklass_user_id = ? WHERE max_user_id = ?",

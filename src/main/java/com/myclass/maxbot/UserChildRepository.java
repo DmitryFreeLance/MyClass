@@ -61,6 +61,14 @@ public class UserChildRepository {
     );
   }
 
+  public java.util.List<Long> listMaxUserIdsByMoyklassUserId(long moyklassUserId) {
+    return jdbcTemplate.query(
+        "SELECT max_user_id FROM user_children WHERE moyklass_user_id = ?",
+        (rs, rowNum) -> rs.getLong("max_user_id"),
+        moyklassUserId
+    );
+  }
+
   public static class UserChild {
     private final long id;
     private final long maxUserId;

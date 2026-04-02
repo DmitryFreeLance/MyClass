@@ -30,7 +30,17 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_SIGNUP_EMAIL_NEW = "signup_email_new";
   private static final String STATE_SIGNUP_FILIAL_PICK = "signup_filial_pick";
   private static final String STATE_SIGNUP_CLASS_PICK = "signup_class_pick";
+  private static final String STATE_ADMIN_TEXT_EDIT = "admin_text_edit";
   private static final String SCHEDULE_URL = "https://дкразвитие.рф/schedule.html";
+  private static final String TEXT_WELCOME = "text.welcome";
+  private static final String TEXT_SIGNUP_REDIRECT = "text.signup_redirect";
+  private static final String TEXT_LINK_PROMPT = "text.link_prompt";
+  private static final String TEXT_AUTH_PROMPT = "text.auth_prompt";
+  private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
+  private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
+  private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
+  private static final long NOTIFY_POLL_INTERVAL_SEC = 60;
+  private static final long REFERENCE_CACHE_TTL_MS = 60 * 60 * 1000L;
 
   private final BotProperties properties;
   private final MaxApiClient maxApiClient;
@@ -38,6 +48,9 @@ public class MaxBotService implements ApplicationRunner {
   private final BotStateRepository botStateRepository;
   private final UserRepository userRepository;
   private final UserChildRepository userChildRepository;
+  private final BotTextRepository botTextRepository;
+  private final UserNotificationRepository userNotificationRepository;
+  private final AdminUserRepository adminUserRepository;
   private final DialogRepository dialogRepository;
   private final DialogService dialogService;
   private final MoyKlassClient moyKlassClient;
@@ -47,6 +60,10 @@ public class MaxBotService implements ApplicationRunner {
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private volatile boolean running = true;
+  private volatile Map<Long, MoyKlassClient.ClassGroup> classCache = Map.of();
+  private volatile Map<Long, String> courseCache = Map.of();
+  private volatile long classCacheUpdatedAt = 0;
+  private volatile long courseCacheUpdatedAt = 0;
 
   public MaxBotService(
       BotProperties properties,
@@ -55,6 +72,9 @@ public class MaxBotService implements ApplicationRunner {
       BotStateRepository botStateRepository,
       UserRepository userRepository,
       UserChildRepository userChildRepository,
+      BotTextRepository botTextRepository,
+      UserNotificationRepository userNotificationRepository,
+      AdminUserRepository adminUserRepository,
       DialogRepository dialogRepository,
       DialogService dialogService,
       MoyKlassClient moyKlassClient,
@@ -67,6 +87,9 @@ public class MaxBotService implements ApplicationRunner {
     this.botStateRepository = botStateRepository;
     this.userRepository = userRepository;
     this.userChildRepository = userChildRepository;
+    this.botTextRepository = botTextRepository;
+    this.userNotificationRepository = userNotificationRepository;
+    this.adminUserRepository = adminUserRepository;
     this.dialogRepository = dialogRepository;
     this.dialogService = dialogService;
     this.moyKlassClient = moyKlassClient;
@@ -85,6 +108,10 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     executor.submit(this::pollLoop);
+    if (properties.getMoyklass().isEnabled() && properties.getMoyklass().getToken() != null
+        && !properties.getMoyklass().getToken().isBlank()) {
+      scheduler.scheduleAtFixedRate(this::pollNotifications, 10, NOTIFY_POLL_INTERVAL_SEC, TimeUnit.SECONDS);
+    }
   }
 
   @PreDestroy
@@ -122,6 +149,193 @@ public class MaxBotService implements ApplicationRunner {
         sleepQuietly(2000);
       }
     }
+  }
+
+  private void pollNotifications() {
+    try {
+      pollLessonNotifications();
+    } catch (Exception e) {
+      log.warn("Failed to poll lesson notifications: {}", e.getMessage());
+    }
+    try {
+      pollPaymentNotifications();
+    } catch (Exception e) {
+      log.warn("Failed to poll payment notifications: {}", e.getMessage());
+    }
+  }
+
+  private void pollLessonNotifications() {
+    long lastId = botStateRepository.get(STATE_LAST_LESSON_RECORD)
+        .map(this::parseLongSafe)
+        .orElse(0L);
+    List<MoyKlassClient.LessonRecordEvent> events = moyKlassClient.listVisitedLessonRecords(lastId);
+    if (events.isEmpty()) {
+      return;
+    }
+    long maxId = lastId;
+    for (MoyKlassClient.LessonRecordEvent event : events) {
+      if (event.getId() > maxId) {
+        maxId = event.getId();
+      }
+      if (lastId > 0) {
+        sendLessonNotification(event);
+      }
+    }
+    if (maxId > lastId) {
+      botStateRepository.set(STATE_LAST_LESSON_RECORD, String.valueOf(maxId));
+    }
+  }
+
+  private void pollPaymentNotifications() {
+    long lastId = botStateRepository.get(STATE_LAST_PAYMENT)
+        .map(this::parseLongSafe)
+        .orElse(0L);
+    List<MoyKlassClient.PaymentEvent> events = moyKlassClient.listIncomingPayments(lastId);
+    if (events.isEmpty()) {
+      return;
+    }
+    long maxId = lastId;
+    for (MoyKlassClient.PaymentEvent event : events) {
+      if (event.getId() > maxId) {
+        maxId = event.getId();
+      }
+      if (lastId > 0) {
+        sendPaymentNotification(event);
+      }
+    }
+    if (maxId > lastId) {
+      botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
+    }
+  }
+
+  private void sendLessonNotification(MoyKlassClient.LessonRecordEvent event) {
+    if (event == null || event.getUserId() <= 0) {
+      return;
+    }
+    List<Long> maxUserIds = userChildRepository.listMaxUserIdsByMoyklassUserId(event.getUserId());
+    if (maxUserIds.isEmpty()) {
+      return;
+    }
+    Map<Long, MoyKlassClient.ClassGroup> classMap = getClassMap();
+    Map<Long, String> courseMap = getCourseMap();
+    MoyKlassClient.ClassGroup group = event.getClassId() > 0 ? classMap.get(event.getClassId()) : null;
+    String className = group != null && group.getName() != null && !group.getName().isBlank()
+        ? group.getName()
+        : (event.getClassId() > 0 ? "Группа #" + event.getClassId() : "Группа");
+    String courseName = resolveCourseName(group, courseMap);
+    MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(event.getUserId());
+    int remaining = findRemainingFor(details, courseName, className);
+    String remainingText = remaining >= 0
+        ? String.valueOf(remaining)
+        : String.valueOf(details != null ? details.getTotal() : 0);
+    String message = "У вас прошло занятие: " + courseName + " - " + className
+        + "\nОстаток занятий: " + remainingText;
+    for (Long maxUserId : maxUserIds) {
+      if (maxUserId != null && maxUserId > 0) {
+        sendUserMessage(maxUserId, message);
+      }
+    }
+  }
+
+  private void sendPaymentNotification(MoyKlassClient.PaymentEvent event) {
+    if (event == null || event.getUserId() <= 0) {
+      return;
+    }
+    List<Long> maxUserIds = userChildRepository.listMaxUserIdsByMoyklassUserId(event.getUserId());
+    if (maxUserIds.isEmpty()) {
+      return;
+    }
+    MoyKlassClient.RemainingDetails details = moyKlassClient.getRemainingDetailsByMoyklassUserId(event.getUserId());
+    String remainingText = formatPaymentRemaining(details);
+    String message = "Благодарим за оплату.\nВаш остаток занятий:\n" + remainingText;
+    for (Long maxUserId : maxUserIds) {
+      if (maxUserId != null && maxUserId > 0) {
+        sendUserMessage(maxUserId, message);
+      }
+    }
+  }
+
+  private Map<Long, MoyKlassClient.ClassGroup> getClassMap() {
+    long now = System.currentTimeMillis();
+    if (classCache.isEmpty() || now - classCacheUpdatedAt > REFERENCE_CACHE_TTL_MS) {
+      Map<Long, MoyKlassClient.ClassGroup> next = new java.util.LinkedHashMap<>();
+      for (MoyKlassClient.ClassGroup group : moyKlassClient.listClasses()) {
+        if (group.getId() > 0) {
+          next.put(group.getId(), group);
+        }
+      }
+      classCache = next;
+      classCacheUpdatedAt = now;
+    }
+    return classCache;
+  }
+
+  private Map<Long, String> getCourseMap() {
+    long now = System.currentTimeMillis();
+    if (courseCache.isEmpty() || now - courseCacheUpdatedAt > REFERENCE_CACHE_TTL_MS) {
+      Map<Long, String> next = new java.util.LinkedHashMap<>();
+      for (MoyKlassClient.Course course : moyKlassClient.listCourses()) {
+        if (course.getId() > 0 && course.getName() != null && !course.getName().isBlank()) {
+          next.put(course.getId(), course.getName());
+        }
+      }
+      courseCache = next;
+      courseCacheUpdatedAt = now;
+    }
+    return courseCache;
+  }
+
+  private String resolveCourseName(MoyKlassClient.ClassGroup group, Map<Long, String> courseMap) {
+    if (group != null && group.getCourseId() > 0) {
+      String name = courseMap.get(group.getCourseId());
+      if (name != null && !name.isBlank()) {
+        return name;
+      }
+      return "Курс #" + group.getCourseId();
+    }
+    return "Прочее";
+  }
+
+  private int findRemainingFor(MoyKlassClient.RemainingDetails details, String courseName, String className) {
+    if (details == null || details.getItems() == null) {
+      return -1;
+    }
+    for (MoyKlassClient.RemainingItem item : details.getItems()) {
+      if (item == null) {
+        continue;
+      }
+      String course = item.getCourseName() == null ? "" : item.getCourseName();
+      String clazz = item.getClassName() == null ? "" : item.getClassName();
+      if (course.equalsIgnoreCase(courseName) && clazz.equalsIgnoreCase(className)) {
+        return item.getRemaining();
+      }
+    }
+    return -1;
+  }
+
+  private String formatPaymentRemaining(MoyKlassClient.RemainingDetails details) {
+    if (details == null) {
+      return "Остаток занятий: 0";
+    }
+    List<MoyKlassClient.RemainingItem> items = details.getItems();
+    if (items == null || items.isEmpty()) {
+      return "Остаток занятий: " + details.getTotal();
+    }
+    StringBuilder sb = new StringBuilder();
+    boolean first = true;
+    for (MoyKlassClient.RemainingItem item : items) {
+      String course = item.getCourseName() == null ? "Прочее" : item.getCourseName();
+      String clazz = item.getClassName();
+      String label = clazz == null || clazz.isBlank()
+          ? course
+          : course + " - " + clazz;
+      if (!first) {
+        sb.append("\n");
+      }
+      first = false;
+      sb.append(label).append(": ").append(item.getRemaining());
+    }
+    return sb.toString();
   }
 
   private void handleUpdate(JsonNode update) {
@@ -187,10 +401,14 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
-    if (senderId == properties.getMax().getAdminUserId()) {
+    if (isAdmin(senderId)) {
       boolean hasAdminDialog = getActiveAdminDialog().isPresent();
-      if (text.startsWith("/ask") || text.startsWith("/admin") || hasAdminDialog) {
-        handleAdminMessage(text);
+      boolean isEditingText = userStateRepository.getState(senderId)
+          .map(state -> STATE_ADMIN_TEXT_EDIT.equals(state.getState()))
+          .orElse(false);
+      if (text.startsWith("/ask") || text.startsWith("/admin") || text.startsWith("/users")
+          || text.startsWith("/add") || hasAdminDialog || isEditingText) {
+        handleAdminMessage(senderId, text);
       } else {
         handleUserMessage(senderId, text);
       }
@@ -224,6 +442,13 @@ public class MaxBotService implements ApplicationRunner {
     }
 
     if (payload == null) {
+      return;
+    }
+
+    if (payload.startsWith("admin:text:")) {
+      if (isAdmin(userId)) {
+        handleAdminTextCallback(userId, payload);
+      }
       return;
     }
 
@@ -287,22 +512,33 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
-  private void handleAdminMessage(String text) {
+  private void handleAdminMessage(long adminId, String text) {
+    UserStateRepository.UserState adminState = userStateRepository.getState(adminId)
+        .orElse(null);
+    if (adminState != null && STATE_ADMIN_TEXT_EDIT.equals(adminState.getState())) {
+      handleAdminTextEdit(adminId, text);
+      return;
+    }
+
     if (text.startsWith("/admin")) {
-      String url = properties.getAdmin().getPanelUrl();
-      if (url == null || url.isBlank()) {
-        url = "http://<ваш-домен>/admin/index.html";
-      }
-      sendAdminMessage("Админ-панель: " + url
-          + "\nДля диалога с клиентом: /ask <номер телефона>"
-          + "\nЕсли найдено несколько клиентов: /ask <номер телефона> <ФИО ребенка>");
+      showAdminMenu(adminId);
+      return;
+    }
+
+    if (text.startsWith("/users")) {
+      handleAdminUsers(adminId, text);
+      return;
+    }
+
+    if (text.startsWith("/add")) {
+      handleAdminAdd(adminId, text);
       return;
     }
 
     if (text.startsWith("/ask")) {
       String[] parts = text.split("\\s+", 3);
       if (parts.length < 2) {
-        sendAdminMessage("Формат: /ask <номер телефона> [ФИО ребенка]");
+        sendAdminMessage(adminId, "Формат: /ask <номер телефона> [ФИО ребенка]");
         return;
       }
       String target = parts[1];
@@ -316,7 +552,7 @@ public class MaxBotService implements ApplicationRunner {
           lookup = moyKlassClient.resolveMaxUserIdByPhone(digits);
         }
         if (!lookup.isSuccess()) {
-          sendAdminMessage(lookup.getMessage());
+          sendAdminMessage(adminId, lookup.getMessage());
           return;
         }
         userId = parseLongSafe(lookup.getData());
@@ -325,13 +561,13 @@ public class MaxBotService implements ApplicationRunner {
       }
 
       if (userId <= 0) {
-        sendAdminMessage("Не смог распознать номер телефона или user_id: " + parts[1]);
+        sendAdminMessage(adminId, "Не смог распознать номер телефона или user_id: " + parts[1]);
         return;
       }
       String intro = "";
-      DialogRecord dialog = dialogService.startDialog(userId, properties.getMax().getAdminUserId(), intro);
+      DialogRecord dialog = dialogService.startDialog(userId, adminId, intro);
       botStateRepository.set(STATE_ADMIN_DIALOG, String.valueOf(dialog.getId()));
-      sendAdminMessageWithClose("Диалог начат с пользователем " + userId + ".", dialog.getId());
+      sendAdminMessageWithClose(adminId, "Диалог начат с пользователем " + userId + ".", dialog.getId());
       return;
     }
 
@@ -340,18 +576,191 @@ public class MaxBotService implements ApplicationRunner {
         .filter(id -> id > 0);
 
     if (currentDialogId.isEmpty()) {
-      sendAdminMessage("Нет активного диалога. Используйте /ask <user_id>.");
+      sendAdminMessage(adminId, "Нет активного диалога. Используйте /ask <user_id>.");
       return;
     }
 
     DialogRecord dialog = dialogRepository.findById(currentDialogId.get()).orElse(null);
     if (dialog == null || !dialog.isActive()) {
-      sendAdminMessage("Диалог уже завершен. Используйте /ask <user_id>.");
+      sendAdminMessage(adminId, "Диалог уже завершен. Используйте /ask <user_id>.");
       botStateRepository.delete(STATE_ADMIN_DIALOG);
       return;
     }
 
     dialogService.forwardAdminMessage(dialog, text);
+  }
+
+  private void handleAdminUsers(long adminId, String text) {
+    int pageSize = 20;
+    int page = 1;
+    String[] parts = text == null ? new String[0] : text.trim().split("\\s+");
+    if (parts.length >= 2) {
+      try {
+        page = Integer.parseInt(parts[1].trim());
+      } catch (NumberFormatException e) {
+        sendAdminMessage(adminId, "Формат: /users [номер страницы]");
+        return;
+      }
+    }
+    if (page < 1) {
+      sendAdminMessage(adminId, "Номер страницы должен быть >= 1.");
+      return;
+    }
+
+    int total = userRepository.countUsers();
+    if (total <= 0) {
+      sendAdminMessage(adminId, "Пользователей пока нет.");
+      return;
+    }
+    int totalPages = (total + pageSize - 1) / pageSize;
+    if (page > totalPages) {
+      sendAdminMessage(adminId, "Страница вне диапазона. Доступно страниц: " + totalPages + ".");
+      return;
+    }
+
+    int offset = (page - 1) * pageSize;
+    List<UserRecord> users = userRepository.listUsersPage(offset, pageSize);
+
+    StringBuilder out = new StringBuilder();
+    out.append("Пользователи (стр ")
+        .append(page)
+        .append("/")
+        .append(totalPages)
+        .append(", всего ")
+        .append(total)
+        .append("):");
+
+    for (UserRecord user : users) {
+      out.append("\n").append(formatUserLine(user));
+    }
+
+    if (page < totalPages) {
+      out.append("\n\nСледующая страница: /users ").append(page + 1);
+    }
+    if (page > 1) {
+      out.append("\nПредыдущая страница: /users ").append(page - 1);
+    }
+
+    sendAdminMessage(adminId, out.toString());
+  }
+
+  private void handleAdminAdd(long adminId, String text) {
+    String[] parts = text == null ? new String[0] : text.trim().split("\\s+");
+    if (parts.length < 2) {
+      sendAdminMessage(adminId, "Формат: /add <user_id>");
+      return;
+    }
+    long userId = parseLongSafe(parts[1]);
+    if (userId <= 0) {
+      sendAdminMessage(adminId, "Не смог распознать user_id: " + parts[1]);
+      return;
+    }
+    adminUserRepository.addAdmin(userId, Instant.now().toEpochMilli());
+    sendAdminMessage(adminId, "Админ добавлен: " + userId);
+  }
+
+  private void handleAdminTextCallback(long adminId, String payload) {
+    if ("admin:text:menu".equals(payload)) {
+      showAdminTextMenu(adminId);
+      return;
+    }
+    if ("admin:text:back".equals(payload)) {
+      showAdminMenu(adminId);
+      return;
+    }
+    if (payload.startsWith("admin:text:set:")) {
+      String key = payload.substring("admin:text:set:".length());
+      AdminTextOption option = findAdminTextOption(key);
+      if (option == null) {
+        sendAdminMessage(adminId, "Неизвестный раздел для изменения текста.");
+        return;
+      }
+      userStateRepository.setState(
+          adminId,
+          STATE_ADMIN_TEXT_EDIT,
+          key,
+          Instant.now().toEpochMilli()
+      );
+      sendAdminMessage(adminId, "Введите новый текст для: " + option.label);
+      return;
+    }
+  }
+
+  private void handleAdminTextEdit(long adminId, String text) {
+    String newText = text == null ? "" : text.trim();
+    UserStateRepository.UserState adminState = userStateRepository.getState(adminId)
+        .orElse(null);
+    if (adminState == null || adminState.getData() == null || adminState.getData().isBlank()) {
+      userStateRepository.clearState(adminId);
+      sendAdminMessage(adminId, "Не удалось определить раздел. Попробуйте снова.");
+      return;
+    }
+    if (newText.isBlank()) {
+      sendAdminMessage(adminId, "Текст не может быть пустым. Введите новый текст.");
+      return;
+    }
+    String key = adminState.getData();
+    botTextRepository.upsertText(key, newText, Instant.now().toEpochMilli());
+    userStateRepository.clearState(adminId);
+    sendAdminMessage(adminId, "Текст обновлен.");
+    showAdminMenu(adminId);
+  }
+
+  private void showAdminMenu(long adminId) {
+    String url = properties.getAdmin().getPanelUrl();
+    if (url == null || url.isBlank()) {
+      url = "http://<ваш-домен>/admin/index.html";
+    }
+    sendAdminMessage(adminId, "Админ-панель: " + url
+        + "\nДля диалога с клиентом: /ask <номер телефона>"
+        + "\nЕсли найдено несколько клиентов: /ask <номер телефона> <ФИО ребенка>"
+        + "\nСписок пользователей: /users [страница]"
+        + "\nДобавить админа: /add <user_id>",
+        buildAdminMenuAttachments());
+  }
+
+  private void showAdminTextMenu(long adminId) {
+    sendAdminMessage(adminId, "Выберите где изменить текст", buildAdminTextMenuAttachments());
+  }
+
+  private AdminTextOption findAdminTextOption(String key) {
+    for (AdminTextOption option : adminTextOptions()) {
+      if (option.key.equals(key)) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  private List<AdminTextOption> adminTextOptions() {
+    return List.of(
+        new AdminTextOption(TEXT_WELCOME, "В стартовом меню"),
+        new AdminTextOption(TEXT_SIGNUP_REDIRECT, "В Записаться"),
+        new AdminTextOption(TEXT_AUTH_PROMPT, "В Авторизоваться"),
+        new AdminTextOption(TEXT_LINK_PROMPT, "После записи"),
+        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление")
+    );
+  }
+
+  private List<Map<String, Object>> buildAdminMenuAttachments() {
+    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
+    rows.add(List.of(callbackButton("Изменить текст", "admin:text:menu")));
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
+  }
+
+  private List<Map<String, Object>> buildAdminTextMenuAttachments() {
+    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
+    for (AdminTextOption option : adminTextOptions()) {
+      rows.add(List.of(callbackButton(option.label, "admin:text:set:" + option.key)));
+    }
+    rows.add(List.of(callbackButton("Назад", "admin:text:back")));
+    return List.of(Map.of(
+        "type", "inline_keyboard",
+        "payload", Map.of("buttons", rows)
+    ));
   }
 
   private Optional<DialogRecord> getActiveAdminDialog() {
@@ -424,7 +833,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendWelcome(long userId) {
-    String text = "Здравствуйте. \nВыберите действие.";
+    String text = getText(TEXT_WELCOME, "Здравствуйте. \nВыберите действие.");
     sendMainMenuMessage(userId, text);
   }
 
@@ -467,7 +876,8 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendScheduleMessage(long userId) {
-    String text = "Для записи на занятия по английскому языку/творчеству перейдите по ссылке\n(кнопка «Записаться»)";
+    String text = getText(TEXT_SIGNUP_REDIRECT,
+        "Для записи на занятия по английскому языку/творчеству перейдите по ссылке\n(кнопка «Записаться»)");
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
@@ -479,7 +889,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendLinkAccountPrompt(long userId) {
-    String text = "После успешной записи необходимо авторизоваться";
+    String text = getText(TEXT_LINK_PROMPT, "После успешной записи необходимо авторизоваться");
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
@@ -492,7 +902,8 @@ public class MaxBotService implements ApplicationRunner {
 
   private void startSignupPhoneFlow(long userId) {
     userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
-    sendUserMessage(userId, "Введите номер телефона, который использовали при записи ребенка\n(Только цифры)");
+    sendUserMessage(userId, getText(TEXT_AUTH_PROMPT,
+        "Введите номер телефона, который использовали при записи ребенка\n<b>Только цифры</b>"));
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
@@ -501,9 +912,10 @@ public class MaxBotService implements ApplicationRunner {
       userStateRepository.clearState(userId);
       rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
+      maybeSendFirstAuthNotice(userId);
       return;
     }
-    String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\" и выберите \"Нет\".";
+    String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\".";
     if (containsPhoneParseError(result.getMessage())) {
       sendSignupMenuMessage(userId, message);
       return;
@@ -528,6 +940,7 @@ public class MaxBotService implements ApplicationRunner {
       userStateRepository.clearState(userId);
       rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
+      maybeSendFirstAuthNotice(userId);
       return;
     }
     sendUserMessage(userId, result.getMessage());
@@ -687,19 +1100,26 @@ public class MaxBotService implements ApplicationRunner {
     sendMenuMessage(userId, response);
   }
 
-  private void sendAdminMessage(String text) {
-    if (properties.getMax().getAdminUserId() <= 0) {
+  private void sendAdminMessage(long adminId, String text) {
+    if (adminId <= 0) {
       return;
     }
-    sendUserMessage(properties.getMax().getAdminUserId(), text);
+    sendUserMessage(adminId, text);
   }
 
-  private void sendAdminMessageWithClose(String text, long dialogId) {
-    if (properties.getMax().getAdminUserId() <= 0) {
+  private void sendAdminMessage(long adminId, String text, List<Map<String, Object>> attachments) {
+    if (adminId <= 0) {
+      return;
+    }
+    sendUserMessageWithAttachments(adminId, text, attachments);
+  }
+
+  private void sendAdminMessageWithClose(long adminId, String text, long dialogId) {
+    if (adminId <= 0) {
       return;
     }
     try {
-      maxApiClient.sendMessageToUser(properties.getMax().getAdminUserId(), Map.of(
+      maxApiClient.sendMessageToUser(adminId, Map.of(
           "text", text,
           "attachments", keyboardFactory.closeDialogAttachments(dialogId)
       ));
@@ -982,12 +1402,45 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
+  private boolean isAdmin(long userId) {
+    if (userId <= 0) {
+      return false;
+    }
+    if (userId == properties.getMax().getAdminUserId()) {
+      return true;
+    }
+    return adminUserRepository.isAdmin(userId);
+  }
+
   private long parseLongSafe(String value) {
     try {
       return Long.parseLong(value);
     } catch (Exception e) {
       return -1L;
     }
+  }
+
+  private String formatUserLine(UserRecord user) {
+    if (user == null) {
+      return "Без имени — id ?";
+    }
+    String first = user.getFirstName() == null ? "" : user.getFirstName().trim();
+    String last = user.getLastName() == null ? "" : user.getLastName().trim();
+    String name;
+    if (!first.isBlank() && !last.isBlank()) {
+      name = first + " " + last;
+    } else if (!first.isBlank()) {
+      name = first;
+    } else if (!last.isBlank()) {
+      name = last;
+    } else {
+      name = "Без имени";
+    }
+    String username = user.getUsername() == null ? "" : user.getUsername().trim();
+    if (!username.isBlank()) {
+      name = name + " (@" + username + ")";
+    }
+    return name + " — id " + user.getMaxUserId();
   }
 
   private boolean isNoProfileMessage(String message) {
@@ -1137,6 +1590,16 @@ public class MaxBotService implements ApplicationRunner {
     ));
   }
 
+  private static class AdminTextOption {
+    private final String key;
+    private final String label;
+
+    private AdminTextOption(String key, String label) {
+      this.key = key;
+      this.label = label;
+    }
+  }
+
   private List<Map<String, Object>> buildTargetAttachments(List<UserChildRepository.UserChild> children, String prefix) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
     for (UserChildRepository.UserChild child : children) {
@@ -1161,6 +1624,24 @@ public class MaxBotService implements ApplicationRunner {
         "text", text,
         "payload", payload
     );
+  }
+
+  private String getText(String key, String fallback) {
+    return botTextRepository.findText(key)
+        .map(String::trim)
+        .filter(value -> !value.isBlank())
+        .orElse(fallback);
+  }
+
+  private void maybeSendFirstAuthNotice(long userId) {
+    if (userNotificationRepository.isFirstAuthSent(userId)) {
+      return;
+    }
+    String text = getText(TEXT_FIRST_AUTH_NOTICE, "Здесь текст для первого уведомления");
+    if (text != null && !text.isBlank()) {
+      sendUserMessage(userId, text);
+    }
+    userNotificationRepository.markFirstAuthSent(userId);
   }
 
   private String safeText(String text) {

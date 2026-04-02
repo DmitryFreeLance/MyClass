@@ -287,6 +287,32 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   @Override
+  public List<Course> listCourses() {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    try {
+      JsonNode response = getJson("/v1/company/courses");
+      JsonNode items = response.isArray() ? response : response.path("courses");
+      if (items == null || !items.isArray()) {
+        return List.of();
+      }
+      List<Course> courses = new ArrayList<>();
+      for (JsonNode node : items) {
+        long id = node.path("id").asLong(0);
+        String name = node.path("name").asText(null);
+        if (id > 0 && name != null && !name.isBlank()) {
+          courses.add(new Course(id, name));
+        }
+      }
+      return courses;
+    } catch (Exception e) {
+      log.warn("Failed to list courses: {}", e.getMessage());
+      return List.of();
+    }
+  }
+
+  @Override
   public MoyKlassUser getUserInfo(long moyklassUserId) {
     if (moyklassUserId <= 0) {
       return null;
@@ -630,6 +656,106 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       courseName = courseId != 0 ? "Курс #" + courseId : "Прочее";
     }
     return courseName;
+  }
+
+  @Override
+  public List<LessonRecordEvent> listVisitedLessonRecords(long sinceId) {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    List<LessonRecordEvent> result = new ArrayList<>();
+    int limit = 200;
+    int offset = 0;
+    boolean bootstrap = sinceId <= 0;
+    boolean done = false;
+    while (!done) {
+      try {
+        String url = "/v1/company/lessonRecords?visit=true&includeLessons=true"
+            + "&sort=id&sortDirection=desc&limit=" + limit + "&offset=" + offset;
+        JsonNode response = getJson(url);
+        JsonNode items = response.path("lessonRecords");
+        if (items == null || !items.isArray() || items.isEmpty()) {
+          break;
+        }
+        for (JsonNode node : items) {
+          long id = node.path("id").asLong(0);
+          if (id <= sinceId) {
+            done = true;
+            break;
+          }
+          long userId = node.path("userId").asLong(0);
+          long lessonId = node.path("lessonId").asLong(0);
+          long classId = node.path("classId").asLong(0);
+          if (classId == 0) {
+            classId = node.path("lesson").path("classId").asLong(0);
+          }
+          if (id > 0 && userId > 0) {
+            result.add(new LessonRecordEvent(id, userId, lessonId, classId));
+          }
+        }
+        if (items.size() < limit) {
+          break;
+        }
+        if (bootstrap) {
+          break;
+        }
+        offset += limit;
+      } catch (Exception e) {
+        log.warn("Failed to list lesson records: {}", e.getMessage());
+        break;
+      }
+    }
+    java.util.Collections.reverse(result);
+    return result;
+  }
+
+  @Override
+  public List<PaymentEvent> listIncomingPayments(long sinceId) {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    List<PaymentEvent> result = new ArrayList<>();
+    int limit = 200;
+    int offset = 0;
+    boolean bootstrap = sinceId <= 0;
+    boolean done = false;
+    while (!done) {
+      try {
+        String url = "/v1/company/payments?optype=income&sort=id&sortDirection=desc"
+            + "&limit=" + limit + "&offset=" + offset;
+        JsonNode response = getJson(url);
+        JsonNode items = response.path("payments");
+        if (items == null || !items.isArray() || items.isEmpty()) {
+          break;
+        }
+        for (JsonNode node : items) {
+          long id = node.path("id").asLong(0);
+          if (id <= sinceId) {
+            done = true;
+            break;
+          }
+          long userId = node.path("userId").asLong(0);
+          double amount = node.path("summa").asDouble(0);
+          long subIdRaw = node.path("userSubscriptionId").asLong(0);
+          Long subId = subIdRaw > 0 ? subIdRaw : null;
+          if (id > 0 && userId > 0) {
+            result.add(new PaymentEvent(id, userId, amount, subId));
+          }
+        }
+        if (items.size() < limit) {
+          break;
+        }
+        if (bootstrap) {
+          break;
+        }
+        offset += limit;
+      } catch (Exception e) {
+        log.warn("Failed to list payments: {}", e.getMessage());
+        break;
+      }
+    }
+    java.util.Collections.reverse(result);
+    return result;
   }
 
   private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {

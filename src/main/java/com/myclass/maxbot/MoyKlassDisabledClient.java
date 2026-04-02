@@ -25,6 +25,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public java.util.List<Course> listCourses() {
+    log.warn("MoyKlass integration disabled; listCourses skipped");
+    return java.util.List.of();
+  }
+
+  @Override
   public MoyKlassUser getUserInfo(long moyklassUserId) {
     log.warn("MoyKlass integration disabled; getUserInfo skipped");
     return null;
@@ -88,5 +94,17 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   public MoyKlassResult linkByPhoneAndName(long maxUserId, String phone, String childName) {
     log.warn("MoyKlass integration disabled; linkByPhoneAndName skipped");
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
+  public java.util.List<LessonRecordEvent> listVisitedLessonRecords(long sinceId) {
+    log.warn("MoyKlass integration disabled; listVisitedLessonRecords skipped");
+    return java.util.List.of();
+  }
+
+  @Override
+  public java.util.List<PaymentEvent> listIncomingPayments(long sinceId) {
+    log.warn("MoyKlass integration disabled; listIncomingPayments skipped");
+    return java.util.List.of();
   }
 }

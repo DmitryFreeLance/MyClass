@@ -45,3 +45,19 @@ CREATE TABLE IF NOT EXISTS user_children (
   created_at INTEGER NOT NULL,
   UNIQUE(max_user_id, moyklass_user_id)
 );
+
+CREATE TABLE IF NOT EXISTS bot_texts (
+  key TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_notifications (
+  max_user_id INTEGER PRIMARY KEY,
+  first_auth_sent INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  max_user_id INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
