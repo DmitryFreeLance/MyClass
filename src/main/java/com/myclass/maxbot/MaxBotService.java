@@ -203,6 +203,9 @@ public class MaxBotService implements ApplicationRunner {
         if (event.getId() > maxId) {
           maxId = event.getId();
         }
+        if (event.getUserId() > 0) {
+          updatePaymentBaselineForUser(event.getUserId(), event.getId());
+        }
       }
       if (maxId > 0) {
         botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
@@ -219,14 +222,26 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
     long maxId = lastId;
+    Map<Long, Long> maxByUser = new java.util.HashMap<>();
     for (MoyKlassClient.PaymentEvent event : events) {
       if (event.getId() > maxId) {
         maxId = event.getId();
+      }
+      if (event.getUserId() > 0) {
+        long current = maxByUser.getOrDefault(event.getUserId(), 0L);
+        if (event.getId() > current) {
+          maxByUser.put(event.getUserId(), event.getId());
+        }
       }
       sendPaymentNotification(event);
     }
     if (maxId > lastId) {
       botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
+    }
+    if (!maxByUser.isEmpty()) {
+      for (Map.Entry<Long, Long> entry : maxByUser.entrySet()) {
+        updatePaymentBaselineForUser(entry.getKey(), entry.getValue());
+      }
     }
   }
 
@@ -238,8 +253,9 @@ public class MaxBotService implements ApplicationRunner {
         if (moyklassUserId == null || moyklassUserId <= 0) {
           continue;
         }
+        long userBaseline = getPaymentBaselineForUser(moyklassUserId, lastId);
         for (MoyKlassClient.PaymentEvent event : moyKlassClient
-            .listIncomingPaymentsByUser(moyklassUserId, lastId)) {
+            .listIncomingPaymentsByUser(moyklassUserId, userBaseline)) {
           if (event.getId() > 0) {
             merged.putIfAbsent(event.getId(), event);
           }
@@ -256,6 +272,47 @@ public class MaxBotService implements ApplicationRunner {
     }
     events.sort(java.util.Comparator.comparingLong(MoyKlassClient.PaymentEvent::getId));
     return events;
+  }
+
+  private long getPaymentBaselineForUser(long moyklassUserId, long fallback) {
+    return botStateRepository.get(paymentUserKey(moyklassUserId))
+        .map(this::parseLongSafe)
+        .filter(value -> value > 0)
+        .orElse(fallback);
+  }
+
+  private void updatePaymentBaselineForUser(long moyklassUserId, long lastPaymentId) {
+    if (moyklassUserId <= 0 || lastPaymentId <= 0) {
+      return;
+    }
+    botStateRepository.set(paymentUserKey(moyklassUserId), String.valueOf(lastPaymentId));
+  }
+
+  private void ensurePaymentBaselineForUser(long moyklassUserId) {
+    if (moyklassUserId <= 0) {
+      return;
+    }
+    String key = paymentUserKey(moyklassUserId);
+    boolean exists = botStateRepository.get(key)
+        .map(this::parseLongSafe)
+        .filter(value -> value > 0)
+        .isPresent();
+    if (exists) {
+      return;
+    }
+    long maxId = 0L;
+    for (MoyKlassClient.PaymentEvent event : moyKlassClient.listIncomingPaymentsByUser(moyklassUserId, 0)) {
+      if (event.getId() > maxId) {
+        maxId = event.getId();
+      }
+    }
+    if (maxId > 0) {
+      botStateRepository.set(key, String.valueOf(maxId));
+    }
+  }
+
+  private String paymentUserKey(long moyklassUserId) {
+    return "notify.lastPaymentId.user." + moyklassUserId;
   }
 
   private void sendLessonNotification(MoyKlassClient.LessonRecordEvent event) {
@@ -952,7 +1009,7 @@ public class MaxBotService implements ApplicationRunner {
   private void startSignupPhoneFlow(long userId) {
     userStateRepository.setState(userId, STATE_SIGNUP_PHONE_EXISTING, null, Instant.now().toEpochMilli());
     sendUserMessage(userId, getText(TEXT_AUTH_PROMPT,
-        "Введите номер телефона, который использовали при записи ребенка\n<b>Только цифры</b>"));
+        "Введите номер телефона, который использовали при записи ребенка\n(Только цифры)"));
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
@@ -1600,6 +1657,7 @@ public class MaxBotService implements ApplicationRunner {
     }
     userChildRepository.upsertChild(userId, moyklassUserId, name, Instant.now().toEpochMilli());
     userRepository.setMoyklassUserId(userId, moyklassUserId);
+    ensurePaymentBaselineForUser(moyklassUserId);
   }
 
   private String buildChildrenListText(List<UserChildRepository.UserChild> children) {
