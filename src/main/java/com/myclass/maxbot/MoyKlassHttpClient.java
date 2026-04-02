@@ -718,11 +718,12 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     int limit = 200;
     int offset = 0;
     boolean bootstrap = sinceId <= 0;
+    String dateRange = buildRecentDateRange(7);
     boolean done = false;
     while (!done) {
       try {
         String url = "/v1/company/payments?optype=income&sort=id&sortDirection=desc"
-            + "&limit=" + limit + "&offset=" + offset;
+            + "&limit=" + limit + "&offset=" + offset + dateRange;
         JsonNode response = getJson(url);
         JsonNode items = response.path("payments");
         if (items == null || !items.isArray() || items.isEmpty()) {
@@ -756,6 +757,16 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
     java.util.Collections.reverse(result);
     return result;
+  }
+
+  private String buildRecentDateRange(int days) {
+    try {
+      java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.systemDefault());
+      java.time.LocalDate from = today.minusDays(Math.max(1, days));
+      return "&date=" + from + "," + today;
+    } catch (Exception e) {
+      return "";
+    }
   }
 
   private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {

@@ -39,6 +39,7 @@ public class MaxBotService implements ApplicationRunner {
   private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
+  private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
   private static final long NOTIFY_POLL_INTERVAL_SEC = 60;
   private static final long REFERENCE_CACHE_TTL_MS = 60 * 60 * 1000L;
 
@@ -59,6 +60,7 @@ public class MaxBotService implements ApplicationRunner {
 
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+  private final long bootId = System.currentTimeMillis();
   private volatile boolean running = true;
   private volatile Map<Long, MoyKlassClient.ClassGroup> classCache = Map.of();
   private volatile Map<Long, String> courseCache = Map.of();
@@ -187,6 +189,24 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void pollPaymentNotifications() {
+    long storedBootId = botStateRepository.get(STATE_PAYMENTS_BOOT_ID)
+        .map(this::parseLongSafe)
+        .orElse(0L);
+    if (storedBootId != bootId) {
+      long maxId = 0L;
+      List<MoyKlassClient.PaymentEvent> recent = moyKlassClient.listIncomingPayments(0);
+      for (MoyKlassClient.PaymentEvent event : recent) {
+        if (event.getId() > maxId) {
+          maxId = event.getId();
+        }
+      }
+      if (maxId > 0) {
+        botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
+      }
+      botStateRepository.set(STATE_PAYMENTS_BOOT_ID, String.valueOf(bootId));
+      return;
+    }
+
     long lastId = botStateRepository.get(STATE_LAST_PAYMENT)
         .map(this::parseLongSafe)
         .orElse(0L);
@@ -199,9 +219,7 @@ public class MaxBotService implements ApplicationRunner {
       if (event.getId() > maxId) {
         maxId = event.getId();
       }
-      if (lastId > 0) {
-        sendPaymentNotification(event);
-      }
+      sendPaymentNotification(event);
     }
     if (maxId > lastId) {
       botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
@@ -711,9 +729,7 @@ public class MaxBotService implements ApplicationRunner {
     if (url == null || url.isBlank()) {
       url = "http://<ваш-домен>/admin/index.html";
     }
-    sendAdminMessage(adminId, "Админ-панель: " + url
-        + "\nДля диалога с клиентом: /ask <номер телефона>"
-        + "\nЕсли найдено несколько клиентов: /ask <номер телефона> <ФИО ребенка>"
+    sendAdminMessage(adminId, "Добро пожаловать в Админ-панель"
         + "\nСписок пользователей: /users [страница]"
         + "\nДобавить админа: /add <user_id>",
         buildAdminMenuAttachments());
