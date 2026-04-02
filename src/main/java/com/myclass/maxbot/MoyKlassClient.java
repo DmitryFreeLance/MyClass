@@ -35,6 +35,8 @@ public interface MoyKlassClient {
 
   java.util.List<PaymentEvent> listIncomingPayments(long sinceId);
 
+  java.util.List<PaymentEvent> listIncomingPaymentsByUser(long moyklassUserId, long sinceId);
+
   class Filial {
     private final long id;
     private final String name;

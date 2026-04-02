@@ -69,6 +69,13 @@ public class UserChildRepository {
     );
   }
 
+  public List<Long> listDistinctMoyklassUserIds() {
+    return jdbcTemplate.query(
+        "SELECT DISTINCT moyklass_user_id FROM user_children ORDER BY moyklass_user_id",
+        (rs, rowNum) -> rs.getLong("moyklass_user_id")
+    );
+  }
+
   public static class UserChild {
     private final long id;
     private final long maxUserId;

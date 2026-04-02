@@ -194,7 +194,7 @@ public class MaxBotService implements ApplicationRunner {
         .orElse(0L);
     if (storedBootId != bootId) {
       long maxId = 0L;
-      List<MoyKlassClient.PaymentEvent> recent = moyKlassClient.listIncomingPayments(0);
+      List<MoyKlassClient.PaymentEvent> recent = collectRecentPaymentEvents(0);
       for (MoyKlassClient.PaymentEvent event : recent) {
         if (event.getId() > maxId) {
           maxId = event.getId();
@@ -210,7 +210,7 @@ public class MaxBotService implements ApplicationRunner {
     long lastId = botStateRepository.get(STATE_LAST_PAYMENT)
         .map(this::parseLongSafe)
         .orElse(0L);
-    List<MoyKlassClient.PaymentEvent> events = moyKlassClient.listIncomingPayments(lastId);
+    List<MoyKlassClient.PaymentEvent> events = collectRecentPaymentEvents(lastId);
     if (events.isEmpty()) {
       return;
     }
@@ -224,6 +224,34 @@ public class MaxBotService implements ApplicationRunner {
     if (maxId > lastId) {
       botStateRepository.set(STATE_LAST_PAYMENT, String.valueOf(maxId));
     }
+  }
+
+  private List<MoyKlassClient.PaymentEvent> collectRecentPaymentEvents(long lastId) {
+    List<Long> linkedIds = userChildRepository.listDistinctMoyklassUserIds();
+    if (!linkedIds.isEmpty() && linkedIds.size() <= 200) {
+      Map<Long, MoyKlassClient.PaymentEvent> merged = new java.util.LinkedHashMap<>();
+      for (Long moyklassUserId : linkedIds) {
+        if (moyklassUserId == null || moyklassUserId <= 0) {
+          continue;
+        }
+        for (MoyKlassClient.PaymentEvent event : moyKlassClient
+            .listIncomingPaymentsByUser(moyklassUserId, lastId)) {
+          if (event.getId() > 0) {
+            merged.putIfAbsent(event.getId(), event);
+          }
+        }
+      }
+      java.util.List<MoyKlassClient.PaymentEvent> result = new java.util.ArrayList<>(merged.values());
+      result.sort(java.util.Comparator.comparingLong(MoyKlassClient.PaymentEvent::getId));
+      return result;
+    }
+
+    List<MoyKlassClient.PaymentEvent> events = moyKlassClient.listIncomingPayments(lastId);
+    if (events.isEmpty()) {
+      return events;
+    }
+    events.sort(java.util.Comparator.comparingLong(MoyKlassClient.PaymentEvent::getId));
+    return events;
   }
 
   private void sendLessonNotification(MoyKlassClient.LessonRecordEvent event) {

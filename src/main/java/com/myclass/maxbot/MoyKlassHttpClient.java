@@ -759,6 +759,46 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     return result;
   }
 
+  @Override
+  public List<PaymentEvent> listIncomingPaymentsByUser(long moyklassUserId, long sinceId) {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    if (moyklassUserId <= 0) {
+      return List.of();
+    }
+    List<PaymentEvent> result = new ArrayList<>();
+    int limit = 100;
+    String dateRange = buildRecentDateRange(7);
+    try {
+      String url = "/v1/company/payments?optype=income&sort=id&sortDirection=desc"
+          + "&limit=" + limit + "&userId=" + moyklassUserId + dateRange;
+      JsonNode response = getJson(url);
+      JsonNode items = response.path("payments");
+      if (items == null || !items.isArray() || items.isEmpty()) {
+        return List.of();
+      }
+      for (JsonNode node : items) {
+        long id = node.path("id").asLong(0);
+        if (id <= sinceId) {
+          continue;
+        }
+        long userId = node.path("userId").asLong(0);
+        double amount = node.path("summa").asDouble(0);
+        long subIdRaw = node.path("userSubscriptionId").asLong(0);
+        Long subId = subIdRaw > 0 ? subIdRaw : null;
+        if (id > 0 && userId > 0) {
+          result.add(new PaymentEvent(id, userId, amount, subId));
+        }
+      }
+    } catch (Exception e) {
+      log.warn("Failed to list payments by user {}: {}", moyklassUserId, e.getMessage());
+      return List.of();
+    }
+    java.util.Collections.reverse(result);
+    return result;
+  }
+
   private String buildRecentDateRange(int days) {
     try {
       java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.systemDefault());

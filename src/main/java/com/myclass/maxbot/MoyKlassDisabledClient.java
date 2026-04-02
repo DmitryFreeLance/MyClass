@@ -107,4 +107,10 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
     log.warn("MoyKlass integration disabled; listIncomingPayments skipped");
     return java.util.List.of();
   }
+
+  @Override
+  public java.util.List<PaymentEvent> listIncomingPaymentsByUser(long moyklassUserId, long sinceId) {
+    log.warn("MoyKlass integration disabled; listIncomingPaymentsByUser skipped");
+    return java.util.List.of();
+  }
 }
