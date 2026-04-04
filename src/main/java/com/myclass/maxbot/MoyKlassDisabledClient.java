@@ -55,6 +55,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public java.util.List<SubscriptionRemaining> listSubscriptionRemainings(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; listSubscriptionRemainings skipped for user {}", moyklassUserId);
+    return java.util.List.of();
+  }
+
+  @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
     log.warn("MoyKlass integration disabled; linkByPhone skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");

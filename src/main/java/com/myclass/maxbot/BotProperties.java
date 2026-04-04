@@ -35,7 +35,7 @@ public class BotProperties {
   public static class Max {
     private String baseUrl;
     private String token;
-    private long adminUserId;
+    private String adminUserId;
     private int longPollTimeoutSec;
     private int longPollLimit;
 
@@ -55,12 +55,24 @@ public class BotProperties {
       this.token = token;
     }
 
-    public long getAdminUserId() {
+    public String getAdminUserId() {
       return adminUserId;
     }
 
-    public void setAdminUserId(long adminUserId) {
+    public void setAdminUserId(String adminUserId) {
       this.adminUserId = adminUserId;
+    }
+
+    public long getAdminUserIdAsLong() {
+      if (adminUserId == null || adminUserId.isBlank()) {
+        return 0L;
+      }
+      String first = adminUserId.split("[,\\s]+")[0];
+      try {
+        return Long.parseLong(first.trim());
+      } catch (Exception e) {
+        return 0L;
+      }
     }
 
     public int getLongPollTimeoutSec() {

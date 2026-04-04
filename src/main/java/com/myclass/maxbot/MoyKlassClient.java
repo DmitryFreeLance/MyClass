@@ -17,6 +17,8 @@ public interface MoyKlassClient {
 
   RemainingDetails getRemainingDetailsByMoyklassUserId(long moyklassUserId);
 
+  java.util.List<SubscriptionRemaining> listSubscriptionRemainings(long moyklassUserId);
+
   MoyKlassResult linkByPhone(long maxUserId, String phone);
 
   MoyKlassResult getProfileInfo(long maxUserId);
@@ -196,6 +198,30 @@ public interface MoyKlassClient {
 
     public int getTotal() {
       return total;
+    }
+  }
+
+  class SubscriptionRemaining {
+    private final String courseName;
+    private final String className;
+    private final int remaining;
+
+    public SubscriptionRemaining(String courseName, String className, int remaining) {
+      this.courseName = courseName;
+      this.className = className;
+      this.remaining = remaining;
+    }
+
+    public String getCourseName() {
+      return courseName;
+    }
+
+    public String getClassName() {
+      return className;
+    }
+
+    public int getRemaining() {
+      return remaining;
     }
   }
 

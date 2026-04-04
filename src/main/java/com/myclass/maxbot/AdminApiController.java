@@ -71,7 +71,7 @@ public class AdminApiController {
 
     DialogRecord dialog = dialogService.startDialog(
         payload.userId,
-        properties.getMax().getAdminUserId(),
+        properties.getMax().getAdminUserIdAsLong(),
         payload.message
     );
     botStateRepository.set("admin.current_dialog_id", String.valueOf(dialog.getId()));

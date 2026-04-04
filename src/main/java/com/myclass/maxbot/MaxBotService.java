@@ -114,7 +114,7 @@ public class MaxBotService implements ApplicationRunner {
       log.warn("MAX_BOT_TOKEN is empty. Bot will not start long polling.");
       return;
     }
-    if (properties.getMax().getAdminUserId() <= 0) {
+    if (properties.getMax().getAdminUserIdAsLong() <= 0) {
       log.warn("MAX_ADMIN_USER_ID is not set. Admin features will be disabled.");
     }
 
@@ -387,22 +387,17 @@ public class MaxBotService implements ApplicationRunner {
     int remainingCount = remaining >= 0
         ? remaining
         : (details != null ? details.getTotal() : -1);
+    int remainingRaw = findSubscriptionRemaining(event.getUserId(), courseName, className);
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
         StringBuilder message = new StringBuilder("У вас прошло занятие: ")
             .append(courseName)
             .append(" - ")
             .append(className);
-        if (remainingCount == 1) {
+        if (shouldWarnRemaining(remainingRaw, remainingCount)) {
           String childName = resolveChildName(maxUserId, event.getUserId());
           String program = formatProgramLabel(courseName, className);
-          message.append("\n")
-              .append("У вашего ребёнка ")
-              .append(childName)
-              .append(" осталось 1 оплаченное занятие по ")
-              .append(program)
-              .append(".\nПожалуйста, не забудьте приобрести новый абонемент.")
-              .append("\n(Абонементы бессрочные)");
+          message.append("\n").append(buildRemainingAlert(childName, program, remainingRaw, remainingCount));
         }
         sendUserMessage(maxUserId, message.toString());
       }
@@ -540,6 +535,73 @@ public class MaxBotService implements ApplicationRunner {
       return clazz;
     }
     return course + " - " + clazz;
+  }
+
+  private int findSubscriptionRemaining(long moyklassUserId, String courseName, String className) {
+    List<MoyKlassClient.SubscriptionRemaining> subs = moyKlassClient.listSubscriptionRemainings(moyklassUserId);
+    if (subs.isEmpty()) {
+      return Integer.MIN_VALUE;
+    }
+    String courseNeed = courseName == null ? "" : courseName;
+    String classNeed = className == null ? "" : className;
+    int minRemaining = Integer.MAX_VALUE;
+    boolean found = false;
+    for (MoyKlassClient.SubscriptionRemaining sub : subs) {
+      if (sub == null) {
+        continue;
+      }
+      String course = sub.getCourseName() == null ? "" : sub.getCourseName();
+      String clazz = sub.getClassName() == null ? "" : sub.getClassName();
+      if (course.equalsIgnoreCase(courseNeed) && clazz.equalsIgnoreCase(classNeed)) {
+        found = true;
+        if (sub.getRemaining() < minRemaining) {
+          minRemaining = sub.getRemaining();
+        }
+      }
+    }
+    if (found) {
+      return minRemaining;
+    }
+    for (MoyKlassClient.SubscriptionRemaining sub : subs) {
+      if (sub == null) {
+        continue;
+      }
+      String course = sub.getCourseName() == null ? "" : sub.getCourseName();
+      if (course.equalsIgnoreCase(courseNeed)) {
+        found = true;
+        if (sub.getRemaining() < minRemaining) {
+          minRemaining = sub.getRemaining();
+        }
+      }
+    }
+    return found ? minRemaining : Integer.MIN_VALUE;
+  }
+
+  private boolean shouldWarnRemaining(int remainingRaw, int remainingCountFallback) {
+    if (remainingRaw != Integer.MIN_VALUE) {
+      return remainingRaw <= 1;
+    }
+    return remainingCountFallback >= 0 && remainingCountFallback <= 1;
+  }
+
+  private String buildRemainingAlert(String childName, String program, int remainingRaw, int remainingFallback) {
+    if (remainingRaw < 0) {
+      return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
+          + "\nПожалуйста, не забудьте приобрести новый абонемент."
+          + "\n(Абонементы бессрочные)";
+    }
+    int remaining = remainingRaw == Integer.MIN_VALUE ? remainingFallback : remainingRaw;
+    if (remaining < 0) {
+      remaining = 0;
+    }
+    return "У вашего ребёнка " + childName + " осталось " + remaining + " "
+        + paidLessonPhrase(remaining) + " по " + program + "."
+        + "\nПожалуйста, не забудьте приобрести новый абонемент."
+        + "\n(Абонементы бессрочные)";
+  }
+
+  private String paidLessonPhrase(int remaining) {
+    return remaining == 1 ? "оплаченное занятие" : "оплаченных занятий";
   }
 
   private String formatAmount(double amount) {
@@ -1117,12 +1179,13 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void handleSignupPhoneExisting(long userId, String text) {
+    int beforeCount = userChildRepository.listChildren(userId).size();
     MoyKlassResult result = moyKlassClient.linkByPhone(userId, text);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
       rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
-      maybeSendFirstAuthNotice(userId);
+      sendAuthNoticeIfNewChildren(userId, beforeCount);
       return;
     }
     String message = result.getMessage() + " Если вы новый клиент, нажмите \"Записаться\".";
@@ -1145,12 +1208,13 @@ public class MaxBotService implements ApplicationRunner {
       sendMenuMessage(userId, "Не смог найти номер телефона. Нажмите \"Записаться\" и попробуйте снова.");
       return;
     }
+    int beforeCount = userChildRepository.listChildren(userId).size();
     MoyKlassResult result = moyKlassClient.linkByPhoneAndName(userId, phone, childName);
     if (result.isSuccess()) {
       userStateRepository.clearState(userId);
       rememberLinkedChildren(userId, result);
       sendMenuMessage(userId, "Нашли ваши данные. Теперь можно пользоваться ботом.");
-      maybeSendFirstAuthNotice(userId);
+      sendAuthNoticeIfNewChildren(userId, beforeCount);
       return;
     }
     sendUserMessage(userId, result.getMessage());
@@ -1616,8 +1680,24 @@ public class MaxBotService implements ApplicationRunner {
     if (userId <= 0) {
       return false;
     }
-    if (userId == properties.getMax().getAdminUserId()) {
+    if (userId == properties.getMax().getAdminUserIdAsLong()) {
       return true;
+    }
+    String raw = properties.getMax().getAdminUserId();
+    if (raw != null && !raw.isBlank()) {
+      String[] parts = raw.split("[,\\s]+");
+      for (String part : parts) {
+        if (part == null || part.isBlank()) {
+          continue;
+        }
+        try {
+          if (Long.parseLong(part.trim()) == userId) {
+            return true;
+          }
+        } catch (Exception e) {
+          // ignore invalid ids
+        }
+      }
     }
     return adminUserRepository.isAdmin(userId);
   }
@@ -1844,15 +1924,15 @@ public class MaxBotService implements ApplicationRunner {
         .orElse(fallback);
   }
 
-  private void maybeSendFirstAuthNotice(long userId) {
-    if (userNotificationRepository.isFirstAuthSent(userId)) {
+  private void sendAuthNoticeIfNewChildren(long userId, int beforeCount) {
+    int afterCount = userChildRepository.listChildren(userId).size();
+    if (afterCount <= beforeCount) {
       return;
     }
     String text = getText(TEXT_FIRST_AUTH_NOTICE, "Здесь текст для первого уведомления");
     if (text != null && !text.isBlank()) {
       sendUserMessage(userId, text);
     }
-    userNotificationRepository.markFirstAuthSent(userId);
   }
 
   private String safeText(String text) {

@@ -228,6 +228,50 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   @Override
+  public List<SubscriptionRemaining> listSubscriptionRemainings(long moyklassUserId) {
+    try {
+      String url = "/v1/company/userSubscriptions?userId=" + moyklassUserId + "&limit=200";
+      JsonNode response = getJson(url);
+      JsonNode subs = response.path("subscriptions");
+      if (!subs.isArray() || subs.isEmpty()) {
+        return List.of();
+      }
+
+      Map<Long, ClassGroup> classMap = buildClassMap();
+      Map<Long, String> courseNames = fetchCourseNames();
+      List<SubscriptionRemaining> result = new ArrayList<>();
+      for (JsonNode sub : subs) {
+        int visitCount = sub.path("visitCount").asInt(-1);
+        double visited = -1;
+        if (sub.has("stats")) {
+          visited = sub.path("stats").path("totalVisited").asDouble(-1);
+        }
+        if (visited < 0) {
+          visited = sub.path("visitedCount").asDouble(-1);
+        }
+        if (visitCount < 0 || visited < 0) {
+          continue;
+        }
+        int remaining = (int) Math.round(visitCount - visited);
+        long classId = sub.path("mainClassId").asLong(0);
+        ClassGroup group = classMap.get(classId);
+        long courseId = resolveCourseId(sub, classMap);
+        String courseName = resolveCourseName(sub, courseId, courseNames);
+        String className = group == null ? null : group.getName();
+        result.add(new SubscriptionRemaining(
+            courseName == null ? "Прочее" : courseName,
+            className,
+            remaining
+        ));
+      }
+      return result;
+    } catch (Exception e) {
+      log.warn("Failed to fetch subscription remainings: {}", e.getMessage());
+      return List.of();
+    }
+  }
+
+  @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
     try {
       List<UserCandidate> candidates = findUsersByPhone(phone);
