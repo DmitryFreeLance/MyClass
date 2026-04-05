@@ -570,7 +570,6 @@ public class MaxBotService implements ApplicationRunner {
       return RemainingSnapshot.notFound();
     }
     String courseNeed = courseName == null ? "" : courseName;
-    String classNeed = className == null ? "" : className;
     int sumRemaining = 0;
     boolean hasDebt = false;
     boolean found = false;
@@ -579,8 +578,7 @@ public class MaxBotService implements ApplicationRunner {
         continue;
       }
       String course = sub.getCourseName() == null ? "" : sub.getCourseName();
-      String clazz = sub.getClassName() == null ? "" : sub.getClassName();
-      if (course.equalsIgnoreCase(courseNeed) && clazz.equalsIgnoreCase(classNeed)) {
+      if (!courseNeed.isBlank() && course.equalsIgnoreCase(courseNeed)) {
         found = true;
         sumRemaining += sub.getRemaining();
         if (sub.getRemaining() < 0) {
@@ -591,14 +589,18 @@ public class MaxBotService implements ApplicationRunner {
     if (found) {
       return RemainingSnapshot.found(sumRemaining, hasDebt);
     }
+    String classNeed = className == null ? "" : className;
+    if (classNeed.isBlank()) {
+      return RemainingSnapshot.notFound();
+    }
     sumRemaining = 0;
     hasDebt = false;
     for (MoyKlassClient.SubscriptionRemaining sub : subs) {
       if (sub == null) {
         continue;
       }
-      String course = sub.getCourseName() == null ? "" : sub.getCourseName();
-      if (course.equalsIgnoreCase(courseNeed)) {
+      String clazz = sub.getClassName() == null ? "" : sub.getClassName();
+      if (clazz.equalsIgnoreCase(classNeed)) {
         found = true;
         sumRemaining += sub.getRemaining();
         if (sub.getRemaining() < 0) {
