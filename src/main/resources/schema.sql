@@ -57,6 +57,11 @@ CREATE TABLE IF NOT EXISTS user_notifications (
   first_auth_sent INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS lesson_notifications (
+  record_id INTEGER PRIMARY KEY,
+  notified_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS admin_users (
   max_user_id INTEGER PRIMARY KEY,
   created_at INTEGER NOT NULL

@@ -39,6 +39,7 @@ public class MaxBotService implements ApplicationRunner {
   private static final String TEXT_AUTH_PROMPT = "text.auth_prompt";
   private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
+  private static final String STATE_LESSONS_BOOT_ID = "notify.lessons.bootId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
   private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
   private static final long MARKER_RESET_AFTER_MS = 3 * 60 * 1000L;
@@ -55,6 +56,7 @@ public class MaxBotService implements ApplicationRunner {
   private final UserChildRepository userChildRepository;
   private final BotTextRepository botTextRepository;
   private final UserNotificationRepository userNotificationRepository;
+  private final LessonNotificationRepository lessonNotificationRepository;
   private final AdminUserRepository adminUserRepository;
   private final DialogRepository dialogRepository;
   private final DialogService dialogService;
@@ -85,6 +87,7 @@ public class MaxBotService implements ApplicationRunner {
       UserChildRepository userChildRepository,
       BotTextRepository botTextRepository,
       UserNotificationRepository userNotificationRepository,
+      LessonNotificationRepository lessonNotificationRepository,
       AdminUserRepository adminUserRepository,
       DialogRepository dialogRepository,
       DialogService dialogService,
@@ -100,6 +103,7 @@ public class MaxBotService implements ApplicationRunner {
     this.userChildRepository = userChildRepository;
     this.botTextRepository = botTextRepository;
     this.userNotificationRepository = userNotificationRepository;
+    this.lessonNotificationRepository = lessonNotificationRepository;
     this.adminUserRepository = adminUserRepository;
     this.dialogRepository = dialogRepository;
     this.dialogService = dialogService;
@@ -223,6 +227,10 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void pollLessonNotifications() {
+    long storedBootId = botStateRepository.get(STATE_LESSONS_BOOT_ID)
+        .map(this::parseLongSafe)
+        .orElse(0L);
+    boolean bootstrap = storedBootId != bootId;
     long lastId = botStateRepository.get(STATE_LAST_LESSON_RECORD)
         .map(this::parseLongSafe)
         .orElse(0L);
@@ -230,17 +238,28 @@ public class MaxBotService implements ApplicationRunner {
     if (events.isEmpty()) {
       return;
     }
+    List<Long> recordIds = events.stream()
+        .map(MoyKlassClient.LessonRecordEvent::getId)
+        .filter(id -> id > 0)
+        .toList();
+    java.util.Set<Long> notified = lessonNotificationRepository.findNotifiedRecordIds(recordIds);
     long maxId = lastId;
     for (MoyKlassClient.LessonRecordEvent event : events) {
       if (event.getId() > maxId) {
         maxId = event.getId();
       }
-      if (lastId > 0) {
-        sendLessonNotification(event);
+      if (event.getId() > 0 && !notified.contains(event.getId()) && isLessonConducted(event)) {
+        if (!bootstrap) {
+          sendLessonNotification(event);
+        }
+        lessonNotificationRepository.markNotified(event.getId(), System.currentTimeMillis());
       }
     }
     if (maxId > lastId) {
       botStateRepository.set(STATE_LAST_LESSON_RECORD, String.valueOf(maxId));
+    }
+    if (bootstrap) {
+      botStateRepository.set(STATE_LESSONS_BOOT_ID, String.valueOf(bootId));
     }
   }
 
@@ -365,6 +384,13 @@ public class MaxBotService implements ApplicationRunner {
 
   private String paymentUserKey(long moyklassUserId) {
     return "notify.lastPaymentId.user." + moyklassUserId;
+  }
+
+  private boolean isLessonConducted(MoyKlassClient.LessonRecordEvent event) {
+    if (event == null) {
+      return false;
+    }
+    return event.getLessonStatus() == 1 || event.isVisited();
   }
 
   private void sendLessonNotification(MoyKlassClient.LessonRecordEvent event) {

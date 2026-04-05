@@ -710,12 +710,12 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     List<LessonRecordEvent> result = new ArrayList<>();
     int limit = 200;
     int offset = 0;
-    boolean bootstrap = sinceId <= 0;
+    String dateRange = buildRecentDateRange(7);
     boolean done = false;
     while (!done) {
       try {
-        String url = "/v1/company/lessonRecords?visit=true&includeLessons=true"
-            + "&sort=id&sortDirection=desc&limit=" + limit + "&offset=" + offset;
+        String url = "/v1/company/lessonRecords?includeLessons=true"
+            + "&sort=id&sortDirection=desc&limit=" + limit + "&offset=" + offset + dateRange;
         JsonNode response = getJson(url);
         JsonNode items = response.path("lessonRecords");
         if (items == null || !items.isArray() || items.isEmpty()) {
@@ -723,24 +723,20 @@ public class MoyKlassHttpClient implements MoyKlassClient {
         }
         for (JsonNode node : items) {
           long id = node.path("id").asLong(0);
-          if (id <= sinceId) {
-            done = true;
-            break;
-          }
           long userId = node.path("userId").asLong(0);
           long lessonId = node.path("lessonId").asLong(0);
           long classId = node.path("classId").asLong(0);
           if (classId == 0) {
             classId = node.path("lesson").path("classId").asLong(0);
           }
+          int lessonStatus = node.path("lesson").path("status")
+              .asInt(node.path("lessonStatus").asInt(-1));
+          boolean visited = node.path("visit").asBoolean(false);
           if (id > 0 && userId > 0) {
-            result.add(new LessonRecordEvent(id, userId, lessonId, classId));
+            result.add(new LessonRecordEvent(id, userId, lessonId, classId, lessonStatus, visited));
           }
         }
         if (items.size() < limit) {
-          break;
-        }
-        if (bootstrap) {
           break;
         }
         offset += limit;
