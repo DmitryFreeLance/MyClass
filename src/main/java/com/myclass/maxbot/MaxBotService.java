@@ -576,7 +576,6 @@ public class MaxBotService implements ApplicationRunner {
     }
     String courseNeed = courseName == null ? "" : courseName;
     int sumRemaining = 0;
-    boolean hasDebt = false;
     boolean found = false;
     for (MoyKlassClient.SubscriptionRemaining sub : subs) {
       if (sub == null) {
@@ -586,20 +585,16 @@ public class MaxBotService implements ApplicationRunner {
       if (!courseNeed.isBlank() && course.equalsIgnoreCase(courseNeed)) {
         found = true;
         sumRemaining += sub.getRemaining();
-        if (sub.getRemaining() < 0) {
-          hasDebt = true;
-        }
       }
     }
     if (found) {
-      return RemainingSnapshot.found(sumRemaining, hasDebt);
+      return RemainingSnapshot.found(sumRemaining, sumRemaining < 0);
     }
     String classNeed = className == null ? "" : className;
     if (classNeed.isBlank()) {
       return RemainingSnapshot.notFound();
     }
     sumRemaining = 0;
-    hasDebt = false;
     for (MoyKlassClient.SubscriptionRemaining sub : subs) {
       if (sub == null) {
         continue;
@@ -608,12 +603,9 @@ public class MaxBotService implements ApplicationRunner {
       if (clazz.equalsIgnoreCase(classNeed)) {
         found = true;
         sumRemaining += sub.getRemaining();
-        if (sub.getRemaining() < 0) {
-          hasDebt = true;
-        }
       }
     }
-    return found ? RemainingSnapshot.found(sumRemaining, hasDebt) : RemainingSnapshot.notFound();
+    return found ? RemainingSnapshot.found(sumRemaining, sumRemaining < 0) : RemainingSnapshot.notFound();
   }
 
   private boolean shouldSendRemainingAlert(RemainingState current, RemainingState previous, boolean paid) {
