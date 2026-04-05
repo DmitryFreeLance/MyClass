@@ -1,7 +1,10 @@
 spring:
   datasource:
-    url: jdbc:sqlite:${BOT_DB_PATH:/data/bot.db}
+    url: jdbc:sqlite:${BOT_DB_PATH:/data/bot.db}?busy_timeout=5000&journal_mode=WAL&synchronous=NORMAL
     driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      minimum-idle: 1
   sql:
     init:
       mode: always
