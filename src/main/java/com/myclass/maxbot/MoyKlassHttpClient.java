@@ -710,7 +710,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     List<LessonRecordEvent> result = new ArrayList<>();
     int limit = 200;
     int offset = 0;
-    String dateRange = buildRecentDateRange(7);
+    String dateRange = buildDateRange(7, 1);
     boolean done = false;
     while (!done) {
       try {
@@ -842,10 +842,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private String buildRecentDateRange(int days) {
+    return buildDateRange(days, 0);
+  }
+
+  private String buildDateRange(int daysBack, int daysForward) {
     try {
       java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.systemDefault());
-      java.time.LocalDate from = today.minusDays(Math.max(1, days));
-      return "&date=" + from + "&date=" + today;
+      java.time.LocalDate from = today.minusDays(Math.max(1, daysBack));
+      java.time.LocalDate to = today.plusDays(Math.max(0, daysForward));
+      return "&date=" + from + "&date=" + to;
     } catch (Exception e) {
       return "";
     }
