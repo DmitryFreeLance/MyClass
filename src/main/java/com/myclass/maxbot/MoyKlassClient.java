@@ -256,14 +256,17 @@ public interface MoyKlassClient {
     private final long classId;
     private final int lessonStatus;
     private final boolean visited;
+    private final boolean paid;
 
-    public LessonRecordEvent(long id, long userId, long lessonId, long classId, int lessonStatus, boolean visited) {
+    public LessonRecordEvent(long id, long userId, long lessonId, long classId, int lessonStatus,
+                             boolean visited, boolean paid) {
       this.id = id;
       this.userId = userId;
       this.lessonId = lessonId;
       this.classId = classId;
       this.lessonStatus = lessonStatus;
       this.visited = visited;
+      this.paid = paid;
     }
 
     public long getId() {
@@ -288,6 +291,10 @@ public interface MoyKlassClient {
 
     public boolean isVisited() {
       return visited;
+    }
+
+    public boolean isPaid() {
+      return paid;
     }
   }
 

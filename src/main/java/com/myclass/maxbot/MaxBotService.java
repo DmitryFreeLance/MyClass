@@ -414,7 +414,11 @@ public class MaxBotService implements ApplicationRunner {
         ? remaining
         : (details != null ? details.getTotal() : -1);
     RemainingSnapshot snapshot = findSubscriptionRemainingSnapshot(event.getUserId(), courseName, className);
-    if (!shouldWarnRemaining(snapshot, remainingCount)) {
+    String programKey = buildProgramKey(courseName, className);
+    RemainingState previous = readRemainingState(event.getUserId(), programKey);
+    RemainingState current = buildRemainingState(snapshot, remainingCount, event.isPaid());
+    if (!shouldSendRemainingAlert(current, previous, event.isPaid())) {
+      writeRemainingState(event.getUserId(), programKey, current);
       return;
     }
     for (Long maxUserId : maxUserIds) {
@@ -425,10 +429,11 @@ public class MaxBotService implements ApplicationRunner {
             .append(className);
         String childName = resolveChildName(maxUserId, event.getUserId());
         String program = formatProgramLabel(courseName, className);
-        message.append("\n").append(buildRemainingAlert(childName, program, snapshot, remainingCount));
+        message.append("\n").append(buildRemainingAlert(childName, program, current));
         sendUserMessage(maxUserId, message.toString());
       }
     }
+    writeRemainingState(event.getUserId(), programKey, current);
   }
 
   private void sendPaymentNotification(MoyKlassClient.PaymentEvent event) {
@@ -611,34 +616,35 @@ public class MaxBotService implements ApplicationRunner {
     return found ? RemainingSnapshot.found(sumRemaining, hasDebt) : RemainingSnapshot.notFound();
   }
 
-  private boolean shouldWarnRemaining(RemainingSnapshot snapshot, int remainingCountFallback) {
-    if (snapshot != null && snapshot.isFound()) {
-      if (snapshot.hasDebt()) {
+  private boolean shouldSendRemainingAlert(RemainingState current, RemainingState previous, boolean paid) {
+    if (current == null || !current.isValid()) {
+      return false;
+    }
+    if (!paid) {
+      return true;
+    }
+    if (current.isDebt()) {
+      return previous == null || !previous.isDebt();
+    }
+    if (current.getTotal() <= 1) {
+      if (previous == null) {
         return true;
       }
-      return snapshot.getTotal() <= 1;
+      if (previous.isDebt()) {
+        return true;
+      }
+      return previous.getTotal() > 1;
     }
-    return remainingCountFallback >= 0 && remainingCountFallback <= 1;
+    return false;
   }
 
-  private String buildRemainingAlert(String childName, String program, RemainingSnapshot snapshot,
-                                     int remainingFallback) {
-    if (snapshot != null && snapshot.isFound()) {
-      if (snapshot.hasDebt()) {
-        return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
-            + "\nПожалуйста, не забудьте приобрести новый абонемент."
-            + "\n(Абонементы бессрочные)";
-      }
-      int remaining = snapshot.getTotal();
-      if (remaining < 0) {
-        remaining = 0;
-      }
-      return "У вашего ребёнка " + childName + " осталось " + remaining + " "
-          + paidLessonPhrase(remaining) + " по " + program + "."
+  private String buildRemainingAlert(String childName, String program, RemainingState current) {
+    if (current != null && current.isDebt()) {
+      return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
           + "\nПожалуйста, не забудьте приобрести новый абонемент."
           + "\n(Абонементы бессрочные)";
     }
-    int remaining = remainingFallback;
+    int remaining = current == null ? 0 : current.getTotal();
     if (remaining < 0) {
       remaining = 0;
     }
@@ -646,6 +652,106 @@ public class MaxBotService implements ApplicationRunner {
         + paidLessonPhrase(remaining) + " по " + program + "."
         + "\nПожалуйста, не забудьте приобрести новый абонемент."
         + "\n(Абонементы бессрочные)";
+  }
+
+  private RemainingState buildRemainingState(RemainingSnapshot snapshot, int remainingFallback, boolean paid) {
+    if (snapshot != null && snapshot.isFound()) {
+      boolean debt = snapshot.hasDebt() || !paid;
+      return RemainingState.found(snapshot.getTotal(), debt);
+    }
+    if (remainingFallback < 0) {
+      return RemainingState.notFound();
+    }
+    return RemainingState.found(remainingFallback, !paid);
+  }
+
+  private String buildProgramKey(String courseName, String className) {
+    String course = courseName == null ? "" : courseName.trim();
+    if (!course.isBlank()) {
+      return course;
+    }
+    String clazz = className == null ? "" : className.trim();
+    if (!clazz.isBlank()) {
+      return clazz;
+    }
+    return "Без программы";
+  }
+
+  private RemainingState readRemainingState(long moyklassUserId, String programKey) {
+    if (moyklassUserId <= 0) {
+      return null;
+    }
+    String key = remainingStateKey(moyklassUserId, programKey);
+    return botStateRepository.get(key)
+        .map(RemainingState::fromValue)
+        .orElse(null);
+  }
+
+  private void writeRemainingState(long moyklassUserId, String programKey, RemainingState state) {
+    if (moyklassUserId <= 0 || state == null || !state.isValid()) {
+      return;
+    }
+    String key = remainingStateKey(moyklassUserId, programKey);
+    botStateRepository.set(key, state.toValue());
+  }
+
+  private String remainingStateKey(long moyklassUserId, String programKey) {
+    String safe = java.net.URLEncoder.encode(programKey == null ? "" : programKey,
+        java.nio.charset.StandardCharsets.UTF_8);
+    return "notify.remaining." + moyklassUserId + "." + safe;
+  }
+
+  private static final class RemainingState {
+    private final int total;
+    private final boolean debt;
+    private final boolean valid;
+
+    private RemainingState(int total, boolean debt, boolean valid) {
+      this.total = total;
+      this.debt = debt;
+      this.valid = valid;
+    }
+
+    static RemainingState found(int total, boolean debt) {
+      return new RemainingState(total, debt, true);
+    }
+
+    static RemainingState notFound() {
+      return new RemainingState(0, false, false);
+    }
+
+    static RemainingState fromValue(String value) {
+      if (value == null || value.isBlank()) {
+        return null;
+      }
+      String[] parts = value.split("\\|", -1);
+      if (parts.length < 2) {
+        return null;
+      }
+      try {
+        int total = Integer.parseInt(parts[0]);
+        boolean debt = "1".equals(parts[1]) || "true".equalsIgnoreCase(parts[1]);
+        return found(total, debt);
+      } catch (NumberFormatException e) {
+        return null;
+      }
+    }
+
+    String toValue() {
+      return total + "|" + (debt ? "1" : "0");
+    }
+
+    int getTotal() {
+      return total;
+    }
+
+    boolean isDebt() {
+      return debt;
+    }
+
+    boolean isValid() {
+      return valid;
+    }
   }
 
   private static final class RemainingSnapshot {

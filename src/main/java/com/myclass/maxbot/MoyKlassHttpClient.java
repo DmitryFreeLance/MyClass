@@ -736,8 +736,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
           int lessonStatus = node.path("lesson").path("status")
               .asInt(node.path("lessonStatus").asInt(-1));
           boolean visited = node.path("visit").asBoolean(false);
+          boolean paid = node.path("paid").asBoolean(true);
           if (id > 0 && userId > 0) {
-            result.add(new LessonRecordEvent(id, userId, lessonId, classId, lessonStatus, visited));
+            result.add(new LessonRecordEvent(id, userId, lessonId, classId, lessonStatus, visited, paid));
           }
         }
         if (items.size() < limit) {
