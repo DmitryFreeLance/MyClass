@@ -413,18 +413,19 @@ public class MaxBotService implements ApplicationRunner {
     int remainingCount = remaining >= 0
         ? remaining
         : (details != null ? details.getTotal() : -1);
-    int remainingRaw = findSubscriptionRemaining(event.getUserId(), courseName, className);
+    RemainingSnapshot snapshot = findSubscriptionRemainingSnapshot(event.getUserId(), courseName, className);
+    if (!shouldWarnRemaining(snapshot, remainingCount)) {
+      return;
+    }
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
         StringBuilder message = new StringBuilder("У вас прошло занятие: ")
             .append(courseName)
             .append(" - ")
             .append(className);
-        if (shouldWarnRemaining(remainingRaw, remainingCount)) {
-          String childName = resolveChildName(maxUserId, event.getUserId());
-          String program = formatProgramLabel(courseName, className);
-          message.append("\n").append(buildRemainingAlert(childName, program, remainingRaw, remainingCount));
-        }
+        String childName = resolveChildName(maxUserId, event.getUserId());
+        String program = formatProgramLabel(courseName, className);
+        message.append("\n").append(buildRemainingAlert(childName, program, snapshot, remainingCount));
         sendUserMessage(maxUserId, message.toString());
       }
     }
@@ -563,14 +564,15 @@ public class MaxBotService implements ApplicationRunner {
     return course + " - " + clazz;
   }
 
-  private int findSubscriptionRemaining(long moyklassUserId, String courseName, String className) {
+  private RemainingSnapshot findSubscriptionRemainingSnapshot(long moyklassUserId, String courseName, String className) {
     List<MoyKlassClient.SubscriptionRemaining> subs = moyKlassClient.listSubscriptionRemainings(moyklassUserId);
     if (subs.isEmpty()) {
-      return Integer.MIN_VALUE;
+      return RemainingSnapshot.notFound();
     }
     String courseNeed = courseName == null ? "" : courseName;
     String classNeed = className == null ? "" : className;
-    int minRemaining = Integer.MAX_VALUE;
+    int sumRemaining = 0;
+    boolean hasDebt = false;
     boolean found = false;
     for (MoyKlassClient.SubscriptionRemaining sub : subs) {
       if (sub == null) {
@@ -580,14 +582,17 @@ public class MaxBotService implements ApplicationRunner {
       String clazz = sub.getClassName() == null ? "" : sub.getClassName();
       if (course.equalsIgnoreCase(courseNeed) && clazz.equalsIgnoreCase(classNeed)) {
         found = true;
-        if (sub.getRemaining() < minRemaining) {
-          minRemaining = sub.getRemaining();
+        sumRemaining += sub.getRemaining();
+        if (sub.getRemaining() < 0) {
+          hasDebt = true;
         }
       }
     }
     if (found) {
-      return minRemaining;
+      return RemainingSnapshot.found(sumRemaining, hasDebt);
     }
+    sumRemaining = 0;
+    hasDebt = false;
     for (MoyKlassClient.SubscriptionRemaining sub : subs) {
       if (sub == null) {
         continue;
@@ -595,28 +600,43 @@ public class MaxBotService implements ApplicationRunner {
       String course = sub.getCourseName() == null ? "" : sub.getCourseName();
       if (course.equalsIgnoreCase(courseNeed)) {
         found = true;
-        if (sub.getRemaining() < minRemaining) {
-          minRemaining = sub.getRemaining();
+        sumRemaining += sub.getRemaining();
+        if (sub.getRemaining() < 0) {
+          hasDebt = true;
         }
       }
     }
-    return found ? minRemaining : Integer.MIN_VALUE;
+    return found ? RemainingSnapshot.found(sumRemaining, hasDebt) : RemainingSnapshot.notFound();
   }
 
-  private boolean shouldWarnRemaining(int remainingRaw, int remainingCountFallback) {
-    if (remainingRaw != Integer.MIN_VALUE) {
-      return remainingRaw <= 1;
+  private boolean shouldWarnRemaining(RemainingSnapshot snapshot, int remainingCountFallback) {
+    if (snapshot != null && snapshot.isFound()) {
+      if (snapshot.hasDebt()) {
+        return true;
+      }
+      return snapshot.getTotal() <= 1;
     }
     return remainingCountFallback >= 0 && remainingCountFallback <= 1;
   }
 
-  private String buildRemainingAlert(String childName, String program, int remainingRaw, int remainingFallback) {
-    if (remainingRaw < 0) {
-      return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
+  private String buildRemainingAlert(String childName, String program, RemainingSnapshot snapshot,
+                                     int remainingFallback) {
+    if (snapshot != null && snapshot.isFound()) {
+      if (snapshot.hasDebt()) {
+        return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
+            + "\nПожалуйста, не забудьте приобрести новый абонемент."
+            + "\n(Абонементы бессрочные)";
+      }
+      int remaining = snapshot.getTotal();
+      if (remaining < 0) {
+        remaining = 0;
+      }
+      return "У вашего ребёнка " + childName + " осталось " + remaining + " "
+          + paidLessonPhrase(remaining) + " по " + program + "."
           + "\nПожалуйста, не забудьте приобрести новый абонемент."
           + "\n(Абонементы бессрочные)";
     }
-    int remaining = remainingRaw == Integer.MIN_VALUE ? remainingFallback : remainingRaw;
+    int remaining = remainingFallback;
     if (remaining < 0) {
       remaining = 0;
     }
@@ -624,6 +644,38 @@ public class MaxBotService implements ApplicationRunner {
         + paidLessonPhrase(remaining) + " по " + program + "."
         + "\nПожалуйста, не забудьте приобрести новый абонемент."
         + "\n(Абонементы бессрочные)";
+  }
+
+  private static final class RemainingSnapshot {
+    private final int total;
+    private final boolean hasDebt;
+    private final boolean found;
+
+    private RemainingSnapshot(int total, boolean hasDebt, boolean found) {
+      this.total = total;
+      this.hasDebt = hasDebt;
+      this.found = found;
+    }
+
+    static RemainingSnapshot found(int total, boolean hasDebt) {
+      return new RemainingSnapshot(total, hasDebt, true);
+    }
+
+    static RemainingSnapshot notFound() {
+      return new RemainingSnapshot(0, false, false);
+    }
+
+    int getTotal() {
+      return total;
+    }
+
+    boolean hasDebt() {
+      return hasDebt;
+    }
+
+    boolean isFound() {
+      return found;
+    }
   }
 
   private String paidLessonPhrase(int remaining) {

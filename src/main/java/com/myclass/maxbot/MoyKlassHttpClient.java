@@ -252,6 +252,10 @@ public class MoyKlassHttpClient implements MoyKlassClient {
         if (visitCount < 0 || visited < 0) {
           continue;
         }
+        if (visitCount == 0) {
+          // Unlimited subscription - do not use for remaining warnings.
+          continue;
+        }
         int remaining = (int) Math.round(visitCount - visited);
         long classId = sub.path("mainClassId").asLong(0);
         ClassGroup group = classMap.get(classId);
