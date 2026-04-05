@@ -633,7 +633,7 @@ public class MaxBotService implements ApplicationRunner {
       if (previous.isDebt()) {
         return true;
       }
-      return previous.getTotal() > 1;
+      return previous.getTotal() != current.getTotal();
     }
     return false;
   }
