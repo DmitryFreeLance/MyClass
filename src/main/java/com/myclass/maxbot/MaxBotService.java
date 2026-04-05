@@ -416,7 +416,8 @@ public class MaxBotService implements ApplicationRunner {
     RemainingSnapshot snapshot = findSubscriptionRemainingSnapshot(event.getUserId(), courseName, className);
     String programKey = buildProgramKey(courseName, className);
     RemainingState previous = readRemainingState(event.getUserId(), programKey);
-    RemainingState current = buildRemainingState(snapshot, remainingCount, event.isPaid());
+    RemainingState base = buildRemainingState(snapshot, remainingCount, event.isPaid());
+    RemainingState current = applyDebtHeuristic(base, previous);
     if (!shouldSendRemainingAlert(current, previous, event.isPaid())) {
       writeRemainingState(event.getUserId(), programKey, current);
       return;
@@ -628,6 +629,21 @@ public class MaxBotService implements ApplicationRunner {
       return previous.getTotal() != current.getTotal();
     }
     return false;
+  }
+
+  private RemainingState applyDebtHeuristic(RemainingState base, RemainingState previous) {
+    if (base == null || !base.isValid()) {
+      return base;
+    }
+    boolean debt = base.isDebt();
+    if (!debt && base.getTotal() == 0 && previous != null && previous.isValid()
+        && previous.getTotal() == 0) {
+      debt = true;
+    }
+    if (debt == base.isDebt()) {
+      return base;
+    }
+    return RemainingState.found(base.getTotal(), debt);
   }
 
   private String buildRemainingAlert(String childName, String program, RemainingState current) {
