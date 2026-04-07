@@ -429,8 +429,9 @@ public class MaxBotService implements ApplicationRunner {
             .append(" - ")
             .append(className);
         String childName = resolveChildName(maxUserId, event.getUserId());
+        String courseLabel = formatCourseLabel(courseName, className);
         String program = formatProgramLabel(courseName, className);
-        message.append("\n").append(buildRemainingAlert(childName, program, current));
+        message.append("\n").append(buildRemainingAlert(childName, courseLabel, program, current));
         sendUserMessage(maxUserId, message.toString());
       }
     }
@@ -451,7 +452,7 @@ public class MaxBotService implements ApplicationRunner {
       if (maxUserId != null && maxUserId > 0) {
         String childName = resolveChildName(maxUserId, event.getUserId());
         String message = "Спасибо!\nВаш платеж на сумму " + amountText
-            + " руб. по программе " + program + " за ребенка " + childName + " был получен.";
+            + "руб. по программе " + program + " за ребенка " + childName + " получен.";
         sendUserMessage(maxUserId, message);
       }
     }
@@ -570,6 +571,18 @@ public class MaxBotService implements ApplicationRunner {
     return course + " - " + clazz;
   }
 
+  private String formatCourseLabel(String courseName, String className) {
+    String course = courseName == null ? "" : courseName.trim();
+    if (!course.isBlank()) {
+      return course;
+    }
+    String clazz = className == null ? "" : className.trim();
+    if (!clazz.isBlank()) {
+      return clazz;
+    }
+    return "Без программы";
+  }
+
   private RemainingSnapshot findSubscriptionRemainingSnapshot(long moyklassUserId, String courseName, String className) {
     List<MoyKlassClient.SubscriptionRemaining> subs = moyKlassClient.listSubscriptionRemainings(moyklassUserId);
     if (subs.isEmpty()) {
@@ -646,20 +659,25 @@ public class MaxBotService implements ApplicationRunner {
     return RemainingState.found(base.getTotal(), debt);
   }
 
-  private String buildRemainingAlert(String childName, String program, RemainingState current) {
+  private String buildRemainingAlert(String childName, String courseLabel, String program, RemainingState current) {
     if (current != null && current.isDebt()) {
-      return "Ваш ребёнок " + childName + " посетил занятие в долг по " + program + "."
-          + "\nПожалуйста, не забудьте приобрести новый абонемент."
-          + "\n(Абонементы бессрочные)";
+      return "Здравствуйте!\n\nВаш ребенок " + childName + " посетил занятие по " + program + " в долг.\n\n" +
+          "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     int remaining = current == null ? 0 : current.getTotal();
-    if (remaining < 0) {
-      remaining = 0;
+    if (remaining <= 0) {
+      return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+          " не осталось оплаченных занятий по " + courseLabel + ".\n\n" +
+          "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
-    return "У вашего ребёнка " + childName + " осталось " + remaining + " "
-        + paidLessonPhrase(remaining) + " по " + program + "."
-        + "\nПожалуйста, не забудьте приобрести новый абонемент."
-        + "\n(Абонементы бессрочные)";
+    if (remaining == 1) {
+      return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+          " осталось 1 оплаченное занятие по " + courseLabel + ".\n\n" +
+          "Пожалуйста, не забудьте приобрести новый абонемент.";
+    }
+    return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+        " осталось " + remaining + " оплаченных занятий по " + courseLabel + ".\n\n" +
+        "Пожалуйста, не забудьте приобрести новый абонемент.";
   }
 
   private RemainingState buildRemainingState(RemainingSnapshot snapshot, int remainingFallback, boolean paid) {
