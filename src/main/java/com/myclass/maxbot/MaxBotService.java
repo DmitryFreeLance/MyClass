@@ -672,21 +672,21 @@ public class MaxBotService implements ApplicationRunner {
 
   private String buildRemainingAlert(String childName, String directionLabel, RemainingState current) {
     if (current != null && current.isDebt()) {
-      return "Здравствуйте!\n\nВаш ребенок " + childName + " посетил занятие по " + directionLabel + " в долг.\n\n"
+      return "Здравствуйте!\n\nВаш ребенок (" + childName + ") посетил занятие по " + directionLabel + ".\n\n"
           + "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     int remaining = current == null ? 0 : current.getTotal();
     if (remaining <= 0) {
-      return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+      return "Здравствуйте!\n\nУ вашего ребенка (" + childName + ")" +
           " не осталось оплаченных занятий по " + directionLabel + ".\n\n" +
           "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     if (remaining == 1) {
-      return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+      return "Здравствуйте!\n\nУ вашего ребенка (" + childName + ")" +
           " осталось 1 оплаченное занятие по " + directionLabel + ".\n\n" +
           "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
-    return "Здравствуйте!\n\nУ вашего ребенка " + childName +
+    return "Здравствуйте!\n\nУ вашего ребенка (" + childName + ")" +
         " осталось " + remaining + " оплаченных занятий по " + directionLabel + ".\n\n" +
         "Пожалуйста, не забудьте приобрести новый абонемент.";
   }
