@@ -38,6 +38,8 @@ public class MaxBotService implements ApplicationRunner {
   private static final String TEXT_LINK_PROMPT = "text.link_prompt";
   private static final String TEXT_AUTH_PROMPT = "text.auth_prompt";
   private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
+  private static final String TEXT_FIRST_AUTH_NOTICE_EN = "text.first_auth_notice.en";
+  private static final String TEXT_FIRST_AUTH_NOTICE_CREATIVE = "text.first_auth_notice.creative";
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LESSONS_BOOT_ID = "notify.lessons.bootId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
@@ -424,15 +426,10 @@ public class MaxBotService implements ApplicationRunner {
     }
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
-        StringBuilder message = new StringBuilder("У вас прошло занятие: ")
-            .append(courseName)
-            .append(" - ")
-            .append(className);
-        String childName = resolveChildName(maxUserId, event.getUserId());
-        String courseLabel = formatCourseLabel(courseName, className);
-        String program = formatProgramLabel(courseName, className);
-        message.append("\n").append(buildRemainingAlert(childName, courseLabel, program, current));
-        sendUserMessage(maxUserId, message.toString());
+        String childName = formatChildShortName(resolveChildName(maxUserId, event.getUserId()));
+        String direction = formatDirectionDative(courseName);
+        String message = buildRemainingAlert(childName, direction, current);
+        sendUserMessage(maxUserId, message);
       }
     }
     writeRemainingState(event.getUserId(), programKey, current);
@@ -571,16 +568,30 @@ public class MaxBotService implements ApplicationRunner {
     return course + " - " + clazz;
   }
 
-  private String formatCourseLabel(String courseName, String className) {
-    String course = courseName == null ? "" : courseName.trim();
-    if (!course.isBlank()) {
-      return course;
+  private String formatDirectionDative(String courseName) {
+    String value = courseName == null ? "" : courseName.toLowerCase(Locale.ROOT);
+    if (value.contains("англий")) {
+      return "Английскому языку";
     }
-    String clazz = className == null ? "" : className.trim();
-    if (!clazz.isBlank()) {
-      return clazz;
+    if (value.contains("творчеств")) {
+      return "Творчеству";
     }
-    return "Без программы";
+    return courseName == null || courseName.isBlank() ? "Без программы" : courseName;
+  }
+
+  private String formatChildShortName(String name) {
+    if (name == null) {
+      return "Ребенок";
+    }
+    String trimmed = name.trim();
+    if (trimmed.isBlank()) {
+      return "Ребенок";
+    }
+    String[] parts = trimmed.split("\\s+");
+    if (parts.length <= 1) {
+      return trimmed;
+    }
+    return parts[0] + " " + parts[1];
   }
 
   private RemainingSnapshot findSubscriptionRemainingSnapshot(long moyklassUserId, String courseName, String className) {
@@ -659,24 +670,24 @@ public class MaxBotService implements ApplicationRunner {
     return RemainingState.found(base.getTotal(), debt);
   }
 
-  private String buildRemainingAlert(String childName, String courseLabel, String program, RemainingState current) {
+  private String buildRemainingAlert(String childName, String directionLabel, RemainingState current) {
     if (current != null && current.isDebt()) {
-      return "Здравствуйте!\n\nВаш ребенок " + childName + " посетил занятие по " + program + " в долг.\n\n" +
-          "Пожалуйста, не забудьте приобрести новый абонемент.";
+      return "Здравствуйте!\n\nВаш ребенок " + childName + " посетил занятие по " + directionLabel + " в долг.\n\n"
+          + "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     int remaining = current == null ? 0 : current.getTotal();
     if (remaining <= 0) {
       return "Здравствуйте!\n\nУ вашего ребенка " + childName +
-          " не осталось оплаченных занятий по " + courseLabel + ".\n\n" +
+          " не осталось оплаченных занятий по " + directionLabel + ".\n\n" +
           "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     if (remaining == 1) {
       return "Здравствуйте!\n\nУ вашего ребенка " + childName +
-          " осталось 1 оплаченное занятие по " + courseLabel + ".\n\n" +
+          " осталось 1 оплаченное занятие по " + directionLabel + ".\n\n" +
           "Пожалуйста, не забудьте приобрести новый абонемент.";
     }
     return "Здравствуйте!\n\nУ вашего ребенка " + childName +
-        " осталось " + remaining + " оплаченных занятий по " + courseLabel + ".\n\n" +
+        " осталось " + remaining + " оплаченных занятий по " + directionLabel + ".\n\n" +
         "Пожалуйста, не забудьте приобрести новый абонемент.";
   }
 
@@ -778,6 +789,12 @@ public class MaxBotService implements ApplicationRunner {
     boolean isValid() {
       return valid;
     }
+  }
+
+  private enum Direction {
+    ENGLISH,
+    CREATIVE,
+    UNKNOWN
   }
 
   private static final class RemainingSnapshot {
@@ -1221,7 +1238,9 @@ public class MaxBotService implements ApplicationRunner {
         new AdminTextOption(TEXT_SIGNUP_REDIRECT, "В Записаться"),
         new AdminTextOption(TEXT_AUTH_PROMPT, "В Авторизоваться"),
         new AdminTextOption(TEXT_LINK_PROMPT, "После записи"),
-        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление")
+        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление (общее)"),
+        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE_EN, "Первое уведомление (Английский)"),
+        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE_CREATIVE, "Первое уведомление (Творчество)")
     );
   }
 
@@ -2141,10 +2160,63 @@ public class MaxBotService implements ApplicationRunner {
     if (afterCount <= beforeCount) {
       return;
     }
-    String text = getText(TEXT_FIRST_AUTH_NOTICE, "Здесь текст для первого уведомления");
+    String textKey = resolveAuthNoticeKey(userId);
+    String text = getText(textKey, "Здесь текст для первого уведомления");
     if (text != null && !text.isBlank()) {
       sendUserMessage(userId, text);
     }
+  }
+
+  private String resolveAuthNoticeKey(long maxUserId) {
+    Direction direction = resolveDirectionForUser(maxUserId);
+    if (direction == Direction.ENGLISH) {
+      return TEXT_FIRST_AUTH_NOTICE_EN;
+    }
+    if (direction == Direction.CREATIVE) {
+      return TEXT_FIRST_AUTH_NOTICE_CREATIVE;
+    }
+    return TEXT_FIRST_AUTH_NOTICE;
+  }
+
+  private Direction resolveDirectionForUser(long maxUserId) {
+    List<UserChildRepository.UserChild> children = userChildRepository.listChildren(maxUserId);
+    if (children.isEmpty()) {
+      return Direction.UNKNOWN;
+    }
+    UserChildRepository.UserChild latest = null;
+    for (UserChildRepository.UserChild child : children) {
+      if (latest == null || child.getCreatedAt() > latest.getCreatedAt()) {
+        latest = child;
+      }
+    }
+    if (latest == null) {
+      return Direction.UNKNOWN;
+    }
+    return resolveDirectionForMoyklassUser(latest.getMoyklassUserId());
+  }
+
+  private Direction resolveDirectionForMoyklassUser(long moyklassUserId) {
+    if (moyklassUserId <= 0) {
+      return Direction.UNKNOWN;
+    }
+    List<MoyKlassClient.SubscriptionRemaining> subs = moyKlassClient.listSubscriptionRemainings(moyklassUserId);
+    for (MoyKlassClient.SubscriptionRemaining sub : subs) {
+      if (sub == null) {
+        continue;
+      }
+      String course = sub.getCourseName();
+      if (course == null) {
+        continue;
+      }
+      String value = course.toLowerCase(Locale.ROOT);
+      if (value.contains("англий")) {
+        return Direction.ENGLISH;
+      }
+      if (value.contains("творчеств")) {
+        return Direction.CREATIVE;
+      }
+    }
+    return Direction.UNKNOWN;
   }
 
   private String safeText(String text) {
