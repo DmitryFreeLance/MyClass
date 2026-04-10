@@ -38,8 +38,6 @@ public class MaxBotService implements ApplicationRunner {
   private static final String TEXT_LINK_PROMPT = "text.link_prompt";
   private static final String TEXT_AUTH_PROMPT = "text.auth_prompt";
   private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
-  private static final String TEXT_FIRST_AUTH_NOTICE_EN = "text.first_auth_notice.en";
-  private static final String TEXT_FIRST_AUTH_NOTICE_CREATIVE = "text.first_auth_notice.creative";
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LESSONS_BOOT_ID = "notify.lessons.bootId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
@@ -436,7 +434,7 @@ public class MaxBotService implements ApplicationRunner {
     }
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
-        String childName = formatChildShortName(resolveChildName(maxUserId, event.getUserId()));
+        String childName = resolveChildName(maxUserId, event.getUserId());
         String message = buildRemainingAlert(childName, direction, current);
         sendUserMessage(maxUserId, message);
       }
@@ -593,21 +591,6 @@ public class MaxBotService implements ApplicationRunner {
       return "Творчеству";
     }
     return courseName == null || courseName.isBlank() ? "Без программы" : courseName;
-  }
-
-  private String formatChildShortName(String name) {
-    if (name == null) {
-      return "Ребенок";
-    }
-    String trimmed = name.trim();
-    if (trimmed.isBlank()) {
-      return "Ребенок";
-    }
-    String[] parts = trimmed.split("\\s+");
-    if (parts.length <= 1) {
-      return trimmed;
-    }
-    return parts[0] + " " + parts[1];
   }
 
   private RemainingSnapshot findSubscriptionRemainingSnapshot(long moyklassUserId, String courseName, String className) {
@@ -805,12 +788,6 @@ public class MaxBotService implements ApplicationRunner {
     boolean isValid() {
       return valid;
     }
-  }
-
-  private enum Direction {
-    ENGLISH,
-    CREATIVE,
-    UNKNOWN
   }
 
   private static final class RemainingSnapshot {
@@ -1254,9 +1231,7 @@ public class MaxBotService implements ApplicationRunner {
         new AdminTextOption(TEXT_SIGNUP_REDIRECT, "В Записаться"),
         new AdminTextOption(TEXT_AUTH_PROMPT, "В Авторизоваться"),
         new AdminTextOption(TEXT_LINK_PROMPT, "После записи"),
-        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление (общее)"),
-        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE_EN, "Первое уведомление (Английский)"),
-        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE_CREATIVE, "Первое уведомление (Творчество)")
+        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление")
     );
   }
 
@@ -2176,63 +2151,10 @@ public class MaxBotService implements ApplicationRunner {
     if (afterCount <= beforeCount) {
       return;
     }
-    String textKey = resolveAuthNoticeKey(userId);
-    String text = getText(textKey, "Здесь текст для первого уведомления");
+    String text = getText(TEXT_FIRST_AUTH_NOTICE, "Здесь текст для первого уведомления");
     if (text != null && !text.isBlank()) {
       sendUserMessage(userId, text);
     }
-  }
-
-  private String resolveAuthNoticeKey(long maxUserId) {
-    Direction direction = resolveDirectionForUser(maxUserId);
-    if (direction == Direction.ENGLISH) {
-      return TEXT_FIRST_AUTH_NOTICE_EN;
-    }
-    if (direction == Direction.CREATIVE) {
-      return TEXT_FIRST_AUTH_NOTICE_CREATIVE;
-    }
-    return TEXT_FIRST_AUTH_NOTICE;
-  }
-
-  private Direction resolveDirectionForUser(long maxUserId) {
-    List<UserChildRepository.UserChild> children = userChildRepository.listChildren(maxUserId);
-    if (children.isEmpty()) {
-      return Direction.UNKNOWN;
-    }
-    UserChildRepository.UserChild latest = null;
-    for (UserChildRepository.UserChild child : children) {
-      if (latest == null || child.getCreatedAt() > latest.getCreatedAt()) {
-        latest = child;
-      }
-    }
-    if (latest == null) {
-      return Direction.UNKNOWN;
-    }
-    return resolveDirectionForMoyklassUser(latest.getMoyklassUserId());
-  }
-
-  private Direction resolveDirectionForMoyklassUser(long moyklassUserId) {
-    if (moyklassUserId <= 0) {
-      return Direction.UNKNOWN;
-    }
-    List<MoyKlassClient.SubscriptionRemaining> subs = moyKlassClient.listSubscriptionRemainings(moyklassUserId);
-    for (MoyKlassClient.SubscriptionRemaining sub : subs) {
-      if (sub == null) {
-        continue;
-      }
-      String course = sub.getCourseName();
-      if (course == null) {
-        continue;
-      }
-      String value = course.toLowerCase(Locale.ROOT);
-      if (value.contains("англий")) {
-        return Direction.ENGLISH;
-      }
-      if (value.contains("творчеств")) {
-        return Direction.CREATIVE;
-      }
-    }
-    return Direction.UNKNOWN;
   }
 
   private String safeText(String text) {
