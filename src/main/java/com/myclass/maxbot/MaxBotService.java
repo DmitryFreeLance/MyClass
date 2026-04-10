@@ -48,7 +48,7 @@ public class MaxBotService implements ApplicationRunner {
   private static final long MARKER_RESET_COOLDOWN_MS = 10 * 60 * 1000L;
   private static final long NOTIFY_LESSONS_INTERVAL_SEC = 60;
   private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 30;
-  private static final long REFERENCE_CACHE_TTL_MS = 60 * 60 * 1000L;
+  private static final long REFERENCE_CACHE_TTL_MS = 60 * 1000L;
 
   private final BotProperties properties;
   private final MaxApiClient maxApiClient;
@@ -406,6 +406,12 @@ public class MaxBotService implements ApplicationRunner {
     Map<Long, MoyKlassClient.ClassGroup> classMap = getClassMap();
     Map<Long, String> courseMap = getCourseMap();
     MoyKlassClient.ClassGroup group = event.getClassId() > 0 ? classMap.get(event.getClassId()) : null;
+    if (group == null && event.getClassId() > 0) {
+      invalidateReferenceCaches();
+      classMap = getClassMap();
+      courseMap = getCourseMap();
+      group = classMap.get(event.getClassId());
+    }
     String className = group != null && group.getName() != null && !group.getName().isBlank()
         ? group.getName()
         : (event.getClassId() > 0 ? "Группа #" + event.getClassId() : "Группа");
@@ -420,6 +426,10 @@ public class MaxBotService implements ApplicationRunner {
     RemainingState previous = readRemainingState(event.getUserId(), programKey);
     RemainingState base = buildRemainingState(snapshot, remainingCount, event.isPaid());
     RemainingState current = applyDebtHeuristic(base, previous);
+    String direction = formatDirectionDative(courseName);
+    log.info("Lesson notify calc: recordId={}, userId={}, classId={}, className='{}', courseName='{}', direction='{}', total={}, debt={}",
+        event.getId(), event.getUserId(), event.getClassId(), className, courseName, direction,
+        current == null ? -999 : current.getTotal(), current != null && current.isDebt());
     if (!shouldSendRemainingAlert(current, previous, event.isPaid())) {
       writeRemainingState(event.getUserId(), programKey, current);
       return;
@@ -427,7 +437,6 @@ public class MaxBotService implements ApplicationRunner {
     for (Long maxUserId : maxUserIds) {
       if (maxUserId != null && maxUserId > 0) {
         String childName = formatChildShortName(resolveChildName(maxUserId, event.getUserId()));
-        String direction = formatDirectionDative(courseName);
         String message = buildRemainingAlert(childName, direction, current);
         sendUserMessage(maxUserId, message);
       }
@@ -483,6 +492,13 @@ public class MaxBotService implements ApplicationRunner {
       courseCacheUpdatedAt = now;
     }
     return courseCache;
+  }
+
+  private void invalidateReferenceCaches() {
+    classCache = Map.of();
+    courseCache = Map.of();
+    classCacheUpdatedAt = 0;
+    courseCacheUpdatedAt = 0;
   }
 
   private String resolveCourseName(MoyKlassClient.ClassGroup group, Map<Long, String> courseMap) {
