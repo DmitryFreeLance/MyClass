@@ -122,6 +122,7 @@ public class BotProperties {
     private String maxIdAttributeAlias;
     private String parentNameAttributeAlias;
     private String payLinkBase;
+    private String allowedClientStateIds;
 
     public boolean isEnabled() {
       return enabled;
@@ -185,6 +186,14 @@ public class BotProperties {
 
     public void setPayLinkBase(String payLinkBase) {
       this.payLinkBase = payLinkBase;
+    }
+
+    public String getAllowedClientStateIds() {
+      return allowedClientStateIds;
+    }
+
+    public void setAllowedClientStateIds(String allowedClientStateIds) {
+      this.allowedClientStateIds = allowedClientStateIds;
     }
   }
 }

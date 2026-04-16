@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -21,11 +22,13 @@ import org.slf4j.LoggerFactory;
 
 public class MoyKlassHttpClient implements MoyKlassClient {
   private static final Logger log = LoggerFactory.getLogger(MoyKlassHttpClient.class);
+  private static final String DEACTIVATED_ACCOUNT_MESSAGE = "Ваша учетная запись деактивирована.\nОбратитесь в поддержку.";
 
   private final BotProperties.Moyklass config;
   private final UserRepository userRepository;
   private final ObjectMapper objectMapper;
   private final HttpClient httpClient;
+  private final java.util.Set<Long> allowedClientStateIds;
 
   private volatile AccessToken accessToken;
 
@@ -36,6 +39,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(Math.max(5, config.getTimeoutSec())))
         .build();
+    this.allowedClientStateIds = parseAllowedStateIds(config.getAllowedClientStateIds());
   }
 
   @Override
@@ -278,11 +282,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   @Override
   public MoyKlassResult linkByPhone(long maxUserId, String phone) {
     try {
-      List<UserCandidate> candidates = findUsersByPhone(phone);
-      if (candidates == null) {
+      UserLookupResult lookup = findUsersByPhoneWithStatus(phone);
+      if (lookup == null) {
         return MoyKlassResult.failure("Не удалось распознать номер телефона.");
       }
+      List<UserCandidate> candidates = lookup.allowed();
       if (candidates.isEmpty()) {
+        if (lookup.foundButBlocked()) {
+          return MoyKlassResult.failure(DEACTIVATED_ACCOUNT_MESSAGE);
+        }
         return MoyKlassResult.failure("По этому номеру клиент не найден.");
       }
       List<MoyKlassUser> linked = new ArrayList<>();
@@ -433,11 +441,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
 
     try {
-      List<UserCandidate> candidates = findUsersByPhone(phone);
-      if (candidates == null) {
+      UserLookupResult lookup = findUsersByPhoneWithStatus(phone);
+      if (lookup == null) {
         return MoyKlassResult.failure("Не удалось распознать номер телефона.");
       }
+      List<UserCandidate> candidates = lookup.allowed();
       if (candidates.isEmpty()) {
+        if (lookup.foundButBlocked()) {
+          return MoyKlassResult.failure(DEACTIVATED_ACCOUNT_MESSAGE);
+        }
         return MoyKlassResult.failure("Клиент с таким телефоном не найден.");
       }
       if (candidates.size() > 1) {
@@ -470,11 +482,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return MoyKlassResult.failure("Не задан alias для max_user_id.");
     }
     try {
-      List<UserCandidate> candidates = findUsersByPhone(phone);
-      if (candidates == null) {
+      UserLookupResult lookup = findUsersByPhoneWithStatus(phone);
+      if (lookup == null) {
         return MoyKlassResult.failure("Не удалось распознать номер телефона.");
       }
+      List<UserCandidate> candidates = lookup.allowed();
       if (candidates.isEmpty()) {
+        if (lookup.foundButBlocked()) {
+          return MoyKlassResult.failure(DEACTIVATED_ACCOUNT_MESSAGE);
+        }
         return MoyKlassResult.failure("Клиент с таким телефоном не найден.");
       }
       List<UserCandidate> matched = filterByName(candidates, childName);
@@ -507,11 +523,15 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return MoyKlassResult.failure("Имя ребенка не указано.");
     }
     try {
-      List<UserCandidate> candidates = findUsersByPhone(phone);
-      if (candidates == null) {
+      UserLookupResult lookup = findUsersByPhoneWithStatus(phone);
+      if (lookup == null) {
         return MoyKlassResult.failure("Не удалось распознать номер телефона.");
       }
+      List<UserCandidate> candidates = lookup.allowed();
       if (candidates.isEmpty()) {
+        if (lookup.foundButBlocked()) {
+          return MoyKlassResult.failure(DEACTIVATED_ACCOUNT_MESSAGE);
+        }
         return MoyKlassResult.failure("По этому номеру клиент не найден.");
       }
       List<UserCandidate> matched = filterByName(candidates, childName);
@@ -861,7 +881,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
   }
 
-  private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
+  private UserLookupResult findUsersByPhoneWithStatus(String phone) throws IOException, InterruptedException {
     if (phone == null || phone.isBlank()) {
       return null;
     }
@@ -870,15 +890,25 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return null;
     }
 
+    boolean foundButBlocked = false;
     for (String variant : variants) {
       String url = "/v1/company/users?phone=" + encode(variant) + "&limit=50";
       JsonNode response = getJson(url);
       JsonNode users = response.path("users");
       if (users.isArray() && users.size() > 0) {
-        return collectUsers(users);
+        List<UserCandidate> allowed = collectUsers(users);
+        if (!allowed.isEmpty()) {
+          return new UserLookupResult(allowed, false);
+        }
+        foundButBlocked = true;
       }
     }
-    return List.of();
+    return new UserLookupResult(List.of(), foundButBlocked);
+  }
+
+  private List<UserCandidate> findUsersByPhone(String phone) throws IOException, InterruptedException {
+    UserLookupResult lookup = findUsersByPhoneWithStatus(phone);
+    return lookup == null ? null : lookup.allowed();
   }
 
   private List<UserCandidate> collectUsers(JsonNode users) {
@@ -891,10 +921,69 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       if (id <= 0) {
         continue;
       }
+      if (!isAllowedForLinking(userNode)) {
+        continue;
+      }
       String name = userNode.path("name").asText("");
       result.add(new UserCandidate(id, name, userNode));
     }
     return result;
+  }
+
+  private boolean isAllowedForLinking(JsonNode userNode) {
+    if (userNode == null || userNode.isMissingNode()) {
+      return false;
+    }
+    long stateId = userNode.path("clientStateId").asLong(0);
+    if (!allowedClientStateIds.isEmpty()) {
+      return stateId > 0 && allowedClientStateIds.contains(stateId);
+    }
+    String name = readClientStateName(userNode);
+    if (name == null || name.isBlank()) {
+      // If API does not provide a readable state name and IDs were not configured,
+      // keep legacy behavior to avoid blocking all links unexpectedly.
+      return true;
+    }
+    String normalized = name.trim().toLowerCase(Locale.ROOT);
+    return normalized.contains("клиент")
+        || normalized.contains("записал")
+        || normalized.contains("новеньк");
+  }
+
+  private String readClientStateName(JsonNode userNode) {
+    String value = userNode.path("clientStateName").asText("");
+    if (!value.isBlank()) {
+      return value;
+    }
+    value = userNode.path("clientState").path("name").asText("");
+    if (!value.isBlank()) {
+      return value;
+    }
+    value = userNode.path("stateName").asText("");
+    if (!value.isBlank()) {
+      return value;
+    }
+    return null;
+  }
+
+  private java.util.Set<Long> parseAllowedStateIds(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return java.util.Set.of();
+    }
+    java.util.Set<Long> ids = new java.util.LinkedHashSet<>();
+    for (String part : raw.split("[,\\s]+")) {
+      if (part == null || part.isBlank()) {
+        continue;
+      }
+      try {
+        long id = Long.parseLong(part.trim());
+        if (id > 0) {
+          ids.add(id);
+        }
+      } catch (NumberFormatException ignored) {
+      }
+    }
+    return java.util.Set.copyOf(ids);
   }
 
   private List<UserCandidate> filterByName(List<UserCandidate> candidates, String childName) {
@@ -959,6 +1048,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private record UserCandidate(long id, String name, JsonNode node) {}
+  private record UserLookupResult(List<UserCandidate> allowed, boolean foundButBlocked) {}
 
   private List<Filial> parseFilials(JsonNode items) {
     if (items == null || !items.isArray()) {
