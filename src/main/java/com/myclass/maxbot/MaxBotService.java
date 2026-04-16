@@ -390,7 +390,9 @@ public class MaxBotService implements ApplicationRunner {
     if (event == null) {
       return false;
     }
-    return event.getLessonStatus() == 1 || event.isVisited();
+    // Notify only for actually visited lessons.
+    // Conducted lesson status alone is not enough: skipped records must not trigger alerts.
+    return event.isVisited() && event.getLessonStatus() == 1;
   }
 
   private void sendLessonNotification(MoyKlassClient.LessonRecordEvent event) {
@@ -422,13 +424,12 @@ public class MaxBotService implements ApplicationRunner {
     RemainingSnapshot snapshot = findSubscriptionRemainingSnapshot(event.getUserId(), courseName, className);
     String programKey = buildProgramKey(courseName, className);
     RemainingState previous = readRemainingState(event.getUserId(), programKey);
-    RemainingState base = buildRemainingState(snapshot, remainingCount, event.isPaid());
-    RemainingState current = applyDebtHeuristic(base, previous);
+    RemainingState current = buildRemainingState(snapshot, remainingCount);
     String direction = formatDirectionDative(courseName);
     log.info("Lesson notify calc: recordId={}, userId={}, classId={}, className='{}', courseName='{}', direction='{}', total={}, debt={}",
         event.getId(), event.getUserId(), event.getClassId(), className, courseName, direction,
         current == null ? -999 : current.getTotal(), current != null && current.isDebt());
-    if (!shouldSendRemainingAlert(current, previous, event.isPaid())) {
+    if (!shouldSendRemainingAlert(current, previous)) {
       writeRemainingState(event.getUserId(), programKey, current);
       return;
     }
@@ -632,12 +633,9 @@ public class MaxBotService implements ApplicationRunner {
     return found ? RemainingSnapshot.found(sumRemaining, sumRemaining < 0) : RemainingSnapshot.notFound();
   }
 
-  private boolean shouldSendRemainingAlert(RemainingState current, RemainingState previous, boolean paid) {
+  private boolean shouldSendRemainingAlert(RemainingState current, RemainingState previous) {
     if (current == null || !current.isValid()) {
       return false;
-    }
-    if (!paid) {
-      return true;
     }
     if (current.isDebt()) {
       return previous == null || !previous.isDebt();
@@ -652,21 +650,6 @@ public class MaxBotService implements ApplicationRunner {
       return previous.getTotal() != current.getTotal();
     }
     return false;
-  }
-
-  private RemainingState applyDebtHeuristic(RemainingState base, RemainingState previous) {
-    if (base == null || !base.isValid()) {
-      return base;
-    }
-    boolean debt = base.isDebt();
-    if (!debt && base.getTotal() == 0 && previous != null && previous.isValid()
-        && previous.getTotal() == 0) {
-      debt = true;
-    }
-    if (debt == base.isDebt()) {
-      return base;
-    }
-    return RemainingState.found(base.getTotal(), debt);
   }
 
   private String buildRemainingAlert(String childName, String directionLabel, RemainingState current) {
@@ -690,15 +673,14 @@ public class MaxBotService implements ApplicationRunner {
         "Пожалуйста, не забудьте приобрести новый абонемент.";
   }
 
-  private RemainingState buildRemainingState(RemainingSnapshot snapshot, int remainingFallback, boolean paid) {
+  private RemainingState buildRemainingState(RemainingSnapshot snapshot, int remainingFallback) {
     if (snapshot != null && snapshot.isFound()) {
-      boolean debt = snapshot.hasDebt() || !paid;
-      return RemainingState.found(snapshot.getTotal(), debt);
+      return RemainingState.found(snapshot.getTotal(), snapshot.hasDebt());
     }
     if (remainingFallback < 0) {
       return RemainingState.notFound();
     }
-    return RemainingState.found(remainingFallback, !paid);
+    return RemainingState.found(remainingFallback, remainingFallback < 0);
   }
 
   private String buildProgramKey(String courseName, String className) {

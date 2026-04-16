@@ -739,6 +739,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     while (!done) {
       try {
         String url = "/v1/company/lessonRecords?includeLessons=true"
+            + "&visit=true"
             + "&sort=id&sortDirection=desc&limit=" + limit + "&offset=" + offset + dateRange;
         JsonNode response = getJson(url);
         JsonNode items = response.path("lessonRecords");
