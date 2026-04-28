@@ -18,10 +18,12 @@ public class MaxApiClient {
   private final ObjectMapper objectMapper;
   private final String baseUrl;
   private final String token;
+  private final List<String> authHeaders;
 
   public MaxApiClient(String baseUrl, String token, ObjectMapper objectMapper) {
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     this.token = token;
+    this.authHeaders = buildAuthHeaders(token);
     this.objectMapper = objectMapper;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -40,17 +42,7 @@ public class MaxApiClient {
       url.append("&types=").append(encode(String.join(",", types)));
     }
 
-    HttpRequest request = HttpRequest.newBuilder()
-        .uri(URI.create(url.toString()))
-        .header("Authorization", token)
-        .GET()
-        .build();
-
-    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    if (response.statusCode() >= 300) {
-      throw new IOException("Max API /updates failed: " + response.statusCode() + " " + response.body());
-    }
-    return objectMapper.readTree(response.body());
+    return getJsonWithAuth(url.toString(), "Max API /updates failed");
   }
 
   public JsonNode sendMessageToUser(long userId, Map<String, Object> body)
@@ -73,18 +65,63 @@ public class MaxApiClient {
 
   private JsonNode postJson(String url, Map<String, Object> body) throws IOException, InterruptedException {
     String json = objectMapper.writeValueAsString(body);
-    HttpRequest request = HttpRequest.newBuilder()
-        .uri(URI.create(url))
-        .header("Authorization", token)
-        .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString(json))
-        .build();
+    return postJsonWithAuth(url, json, "Max API POST failed");
+  }
 
-    HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    if (response.statusCode() >= 300) {
-      throw new IOException("Max API POST failed: " + response.statusCode() + " " + response.body());
+  private JsonNode getJsonWithAuth(String url, String errorPrefix) throws IOException, InterruptedException {
+    IOException last = null;
+    for (String auth : authHeaders) {
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create(url))
+          .header("Authorization", auth)
+          .GET()
+          .build();
+      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() < 300) {
+        return objectMapper.readTree(response.body());
+      }
+      last = new IOException(errorPrefix + ": " + response.statusCode() + " " + response.body());
+      if (response.statusCode() != 401) {
+        break;
+      }
     }
-    return objectMapper.readTree(response.body());
+    throw last == null ? new IOException(errorPrefix + ": unknown error") : last;
+  }
+
+  private JsonNode postJsonWithAuth(String url, String json, String errorPrefix)
+      throws IOException, InterruptedException {
+    IOException last = null;
+    for (String auth : authHeaders) {
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create(url))
+          .header("Authorization", auth)
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(json))
+          .build();
+      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() < 300) {
+        return objectMapper.readTree(response.body());
+      }
+      last = new IOException(errorPrefix + ": " + response.statusCode() + " " + response.body());
+      if (response.statusCode() != 401) {
+        break;
+      }
+    }
+    throw last == null ? new IOException(errorPrefix + ": unknown error") : last;
+  }
+
+  private List<String> buildAuthHeaders(String rawToken) {
+    if (rawToken == null) {
+      return List.of("");
+    }
+    String trimmed = rawToken.trim();
+    if (trimmed.isEmpty()) {
+      return List.of("");
+    }
+    if (trimmed.regionMatches(true, 0, "Bearer ", 0, 7)) {
+      return List.of(trimmed);
+    }
+    return List.of("Bearer " + trimmed, trimmed);
   }
 
   private String encode(String value) {
