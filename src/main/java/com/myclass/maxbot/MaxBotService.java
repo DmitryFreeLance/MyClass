@@ -44,6 +44,9 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
   private static final long MARKER_RESET_AFTER_MS = 3 * 60 * 1000L;
   private static final long MARKER_RESET_COOLDOWN_MS = 10 * 60 * 1000L;
+  private static final long LONG_POLL_ERROR_DELAY_MS = 2_000L;
+  private static final long LONG_POLL_429_BASE_DELAY_MS = 30_000L;
+  private static final long LONG_POLL_429_MAX_DELAY_MS = 120_000L;
   private static final long NOTIFY_LESSONS_INTERVAL_SEC = 60;
   private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 30;
   private static final long REFERENCE_CACHE_TTL_MS = 60 * 1000L;
@@ -73,6 +76,7 @@ public class MaxBotService implements ApplicationRunner {
   private volatile long lastMarkerChangeAt = System.currentTimeMillis();
   private volatile long lastMarkerResetAt = 0L;
   private volatile long lastHeartbeatAt = 0L;
+  private volatile int longPoll429Streak = 0;
   private volatile Map<Long, MoyKlassClient.ClassGroup> classCache = Map.of();
   private volatile Map<Long, String> courseCache = Map.of();
   private volatile long classCacheUpdatedAt = 0;
@@ -154,6 +158,7 @@ public class MaxBotService implements ApplicationRunner {
             properties.getMax().getLongPollTimeoutSec(),
             null
         );
+        longPoll429Streak = 0;
 
         JsonNode updates = response.path("updates");
         int updatesCount = 0;
@@ -173,9 +178,24 @@ public class MaxBotService implements ApplicationRunner {
         marker = maybeResetMarker(marker, updatesCount);
       } catch (Exception e) {
         log.warn("Error in long polling loop: {}", e.getMessage());
-        sleepQuietly(2000);
+        sleepQuietly(computeLongPollErrorDelayMs(e));
       }
     }
+  }
+
+  private long computeLongPollErrorDelayMs(Exception error) {
+    String message = error == null || error.getMessage() == null
+        ? ""
+        : error.getMessage().toLowerCase(Locale.ROOT);
+    if (message.contains("429") || message.contains("too.many.requests")) {
+      longPoll429Streak = Math.min(longPoll429Streak + 1, 4);
+      long delay = LONG_POLL_429_BASE_DELAY_MS * (1L << (longPoll429Streak - 1));
+      long bounded = Math.min(delay, LONG_POLL_429_MAX_DELAY_MS);
+      log.warn("MAX API rate limit detected (streak={}). Backing off for {} ms.", longPoll429Streak, bounded);
+      return bounded;
+    }
+    longPoll429Streak = 0;
+    return LONG_POLL_ERROR_DELAY_MS;
   }
 
   private void logLongPollHeartbeat(Long marker, int updatesCount) {
