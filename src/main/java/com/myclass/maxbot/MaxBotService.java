@@ -875,6 +875,19 @@ public class MaxBotService implements ApplicationRunner {
     return 0;
   }
 
+  public void enqueueWebhookPayload(JsonNode payload) {
+    if (!running) {
+      return;
+    }
+    executor.submit(() -> {
+      try {
+        handleWebhookPayload(payload);
+      } catch (Exception e) {
+        log.warn("Failed to process webhook payload: {}", e.getMessage());
+      }
+    });
+  }
+
   private void handleBotStarted(JsonNode update) {
     JsonNode user = update.path("user");
     long userId = user.path("user_id").asLong(0);

@@ -24,10 +24,11 @@ public class MaxApiClient {
   private final Object rateLock = new Object();
   private final Queue<Long> requestTimestampsMs = new ArrayDeque<>();
 
-  private static final int MAX_RPS = 2;
+  // Webhook mode benefits from a higher ceiling; 429 retry/backoff still protects API.
+  private static final int MAX_RPS = 6;
   private static final long RATE_WINDOW_MS = 1000L;
   private static final int RETRY_429_ATTEMPTS = 4;
-  private static final long RETRY_429_BASE_DELAY_MS = 1500L;
+  private static final long RETRY_429_BASE_DELAY_MS = 500L;
 
   public MaxApiClient(String baseUrl, String token, ObjectMapper objectMapper) {
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;

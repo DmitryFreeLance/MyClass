@@ -17,10 +17,10 @@ public class MaxWebhookController {
 
   @PostMapping("/max/webhook")
   public ResponseEntity<Map<String, Object>> webhook(@RequestBody(required = false) JsonNode payload) {
-    int processed = maxBotService.handleWebhookPayload(payload);
+    maxBotService.enqueueWebhookPayload(payload);
     return ResponseEntity.ok(Map.of(
         "ok", true,
-        "processed", processed
+        "queued", true
     ));
   }
 }
