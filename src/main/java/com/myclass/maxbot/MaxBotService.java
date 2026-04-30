@@ -126,7 +126,11 @@ public class MaxBotService implements ApplicationRunner {
       log.warn("MAX_ADMIN_USER_ID is not set. Admin features will be disabled.");
     }
 
-    executor.submit(this::pollLoop);
+    if (properties.getMax().isWebhookEnabled()) {
+      log.info("MAX webhook mode enabled. Long polling is disabled.");
+    } else {
+      executor.submit(this::pollLoop);
+    }
     if (properties.getMoyklass().isEnabled() && properties.getMoyklass().getToken() != null
         && !properties.getMoyklass().getToken().isBlank()) {
       scheduler.scheduleAtFixedRate(this::pollLessonNotifications, 10,
@@ -843,6 +847,32 @@ public class MaxBotService implements ApplicationRunner {
       case "bot_started" -> handleBotStarted(update);
       default -> log.debug("Skipping update type: {}", updateType);
     }
+  }
+
+  public synchronized int handleWebhookPayload(JsonNode payload) {
+    if (payload == null || payload.isMissingNode() || payload.isNull()) {
+      return 0;
+    }
+    int processed = 0;
+    JsonNode updates = payload.path("updates");
+    if (updates.isArray()) {
+      for (JsonNode update : updates) {
+        handleUpdate(update);
+        processed++;
+      }
+      return processed;
+    }
+    if (payload.has("update_type")) {
+      handleUpdate(payload);
+      return 1;
+    }
+    JsonNode update = payload.path("update");
+    if (!update.isMissingNode() && !update.isNull() && update.has("update_type")) {
+      handleUpdate(update);
+      return 1;
+    }
+    log.warn("Webhook payload format is not recognized: {}", payload);
+    return 0;
   }
 
   private void handleBotStarted(JsonNode update) {

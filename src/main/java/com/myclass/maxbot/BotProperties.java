@@ -36,6 +36,7 @@ public class BotProperties {
     private String baseUrl;
     private String token;
     private String adminUserId;
+    private boolean webhookEnabled;
     private int longPollTimeoutSec;
     private int longPollLimit;
 
@@ -89,6 +90,14 @@ public class BotProperties {
 
     public void setLongPollLimit(int longPollLimit) {
       this.longPollLimit = longPollLimit;
+    }
+
+    public boolean isWebhookEnabled() {
+      return webhookEnabled;
+    }
+
+    public void setWebhookEnabled(boolean webhookEnabled) {
+      this.webhookEnabled = webhookEnabled;
     }
   }
 

@@ -15,6 +15,7 @@ bot:
     base-url: ${MAX_API_BASE_URL:https://platform-api.max.ru}
     token: ${MAX_BOT_TOKEN:}
     admin-user-id: ${MAX_ADMIN_USER_ID:0}
+    webhook-enabled: ${MAX_WEBHOOK_ENABLED:false}
     long-poll-timeout-sec: ${MAX_LONG_POLL_TIMEOUT_SEC:25}
     long-poll-limit: ${MAX_LONG_POLL_LIMIT:100}
   admin:
