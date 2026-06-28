@@ -18,7 +18,7 @@
 - `ADMIN_PANEL_URL` — (необязательно) ссылка на админ‑панель для команды `/admin`
 
 Опциональные:
-- `MAX_API_BASE_URL` — по умолчанию `https://platform-api.max.ru`
+- `MAX_API_BASE_URL` — по умолчанию `https://platform-api2.max.ru`
 - `BOT_DB_PATH` — путь к SQLite (по умолчанию `/data/bot.db`)
 - `MOYKLASS_ENABLED` — `true`/`false`
 - `MOYKLASS_BASE_URL` — по умолчанию `https://api.moyklass.com`
@@ -37,20 +37,28 @@ mvn -q -DskipTests spring-boot:run
 ### Docker
 
 ```bash
-docker build -t max-bot .
+docker build -t myclass .
 
-docker run -d --name max-bot \
-  -p 8080:8080 \
+docker run -d --name myclass --restart unless-stopped \
+  -p 8081:8080 \
   -e MAX_BOT_TOKEN=YOUR_TOKEN \
-  -e MAX_ADMIN_USER_ID=123456 \
+  -e MAX_ADMIN_USER_ID=123456,789012 \
   -e ADMIN_PANEL_TOKEN=secret \
-  -v max-bot-data:/data \
-  max-bot
+  -e MOYKLASS_ENABLED=true \
+  -e MOYKLASS_TOKEN=YOUR_MOYKLASS_TOKEN \
+  -e MAX_WEBHOOK_ENABLED=true \
+  -e MOYKLASS_PARENT_NAME_ATTR_ALIAS=user.parent1 \
+  -e MOYKLASS_LEAD_STATE_ID=323065 \
+  -e MOYKLASS_MAX_ID_ATTR_ALIAS=max_user_id \
+  -e MOYKLASS_PAY_LINK_BASE=https://pay.tvoyklass.com/key/ \
+  -e MOYKLASS_ALLOWED_CLIENT_STATE_IDS=254541,323065,261119 \
+  -v myclass-data:/data \
+  myclass
 ```
 
 ## Админ‑панель
 
-Откройте `http://localhost:8080/admin/index.html`, введите `ADMIN_PANEL_TOKEN`.
+Откройте `http://localhost:8081/admin/index.html`, введите `ADMIN_PANEL_TOKEN`.
 
 Возможности:
 - просмотреть активные диалоги

@@ -12,7 +12,7 @@ spring:
 
 bot:
   max:
-    base-url: ${MAX_API_BASE_URL:https://platform-api.max.ru}
+    base-url: ${MAX_API_BASE_URL:https://platform-api2.max.ru}
     token: ${MAX_BOT_TOKEN:}
     admin-user-id: ${MAX_ADMIN_USER_ID:0}
     webhook-enabled: ${MAX_WEBHOOK_ENABLED:false}
