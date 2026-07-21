@@ -153,7 +153,7 @@ public class PublicSignupController {
 
   private String contactUrl() {
     String value = properties.getSite() == null ? null : properties.getSite().getContactUrl();
-    return value == null || value.isBlank() ? "https://max.ru/id246516134480_2_bot" : value;
+    return value == null || value.isBlank() ? "https://max.ru/u/f9LHodD0cOJNUKEvX8lom5RFjS6uzWWEaBNgRYyNvHAa_WiiftEqSwd7b3I" : value;
   }
 
   public static class SignupRequest {

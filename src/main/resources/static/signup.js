@@ -3,7 +3,7 @@ const state = {
   courses: [],
   classes: [],
   selectedClass: null,
-  contactUrl: 'https://max.ru/id246516134480_2_bot'
+  contactUrl: 'https://max.ru/u/f9LHodD0cOJNUKEvX8lom5RFjS6uzWWEaBNgRYyNvHAa_WiiftEqSwd7b3I'
 };
 
 const $ = (id) => document.getElementById(id);

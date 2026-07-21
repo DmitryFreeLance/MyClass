@@ -19,7 +19,7 @@ bot:
     long-poll-limit: ${MAX_LONG_POLL_LIMIT:100}
   site:
     registration-url: ${SITE_REGISTRATION_URL:https://roboacademiya.ru/}
-    contact-url: ${SITE_CONTACT_URL:https://max.ru/id246516134480_2_bot}
+    contact-url: ${SITE_CONTACT_URL:https://max.ru/u/f9LHodD0cOJNUKEvX8lom5RFjS6uzWWEaBNgRYyNvHAa_WiiftEqSwd7b3I}
   moyklass:
     enabled: ${MOYKLASS_ENABLED:false}
     base-url: ${MOYKLASS_BASE_URL:}

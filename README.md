@@ -51,7 +51,7 @@ docker run -d --name myclass --restart unless-stopped \
   -e MOYKLASS_PAY_LINK_BASE=https://pay.tvoyklass.com/key/ \
   -e MOYKLASS_ALLOWED_CLIENT_STATE_IDS=254541,323065,261119 \
   -e SITE_REGISTRATION_URL=https://roboacademiya.ru/ \
-  -e SITE_CONTACT_URL=https://max.ru/id246516134480_2_bot \
+  -e SITE_CONTACT_URL=https://max.ru/u/f9LHodD0cOJNUKEvX8lom5RFjS6uzWWEaBNgRYyNvHAa_WiiftEqSwd7b3I \
   -v myclass-data:/data \
   myclass
 ```
