@@ -22,7 +22,6 @@ import org.springframework.stereotype.Service;
 public class MaxBotService implements ApplicationRunner {
   private static final Logger log = LoggerFactory.getLogger(MaxBotService.class);
   private static final String STATE_MARKER = "max.marker";
-  private static final String STATE_ADMIN_DIALOG = "admin.current_dialog_id";
   private static final String STATE_SIGNUP_CHOICE = "signup_choice";
   private static final String STATE_SIGNUP_PHONE_EXISTING = "signup_phone_existing";
   private static final String STATE_SIGNUP_NAME_EXISTING = "signup_name_existing";
@@ -31,13 +30,14 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_SIGNUP_EMAIL_NEW = "signup_email_new";
   private static final String STATE_SIGNUP_FILIAL_PICK = "signup_filial_pick";
   private static final String STATE_SIGNUP_CLASS_PICK = "signup_class_pick";
-  private static final String STATE_ADMIN_TEXT_EDIT = "admin_text_edit";
+  private static final String STATE_PASSES_TARGET_PICK = "passes_target_pick";
+  private static final String STATE_INVOICE_TARGET_PICK = "invoice_target_pick";
+  private static final String STATE_REMOVE_CHILD_PICK = "remove_child_pick";
   private static final String SCHEDULE_URL = "https://дкразвитие.рф/schedule.html";
   private static final String TEXT_WELCOME = "text.welcome";
   private static final String TEXT_SIGNUP_REDIRECT = "text.signup_redirect";
   private static final String TEXT_LINK_PROMPT = "text.link_prompt";
   private static final String TEXT_AUTH_PROMPT = "text.auth_prompt";
-  private static final String TEXT_FIRST_AUTH_NOTICE = "text.first_auth_notice";
   private static final String STATE_LAST_LESSON_RECORD = "notify.lastLessonRecordId";
   private static final String STATE_LESSONS_BOOT_ID = "notify.lessons.bootId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
@@ -58,11 +58,7 @@ public class MaxBotService implements ApplicationRunner {
   private final UserRepository userRepository;
   private final UserChildRepository userChildRepository;
   private final BotTextRepository botTextRepository;
-  private final UserNotificationRepository userNotificationRepository;
   private final LessonNotificationRepository lessonNotificationRepository;
-  private final AdminUserRepository adminUserRepository;
-  private final DialogRepository dialogRepository;
-  private final DialogService dialogService;
   private final MoyKlassClient moyKlassClient;
   private final UserStateRepository userStateRepository;
   private final ObjectMapper objectMapper;
@@ -90,11 +86,7 @@ public class MaxBotService implements ApplicationRunner {
       UserRepository userRepository,
       UserChildRepository userChildRepository,
       BotTextRepository botTextRepository,
-      UserNotificationRepository userNotificationRepository,
       LessonNotificationRepository lessonNotificationRepository,
-      AdminUserRepository adminUserRepository,
-      DialogRepository dialogRepository,
-      DialogService dialogService,
       MoyKlassClient moyKlassClient,
       UserStateRepository userStateRepository,
       ObjectMapper objectMapper
@@ -106,11 +98,7 @@ public class MaxBotService implements ApplicationRunner {
     this.userRepository = userRepository;
     this.userChildRepository = userChildRepository;
     this.botTextRepository = botTextRepository;
-    this.userNotificationRepository = userNotificationRepository;
     this.lessonNotificationRepository = lessonNotificationRepository;
-    this.adminUserRepository = adminUserRepository;
-    this.dialogRepository = dialogRepository;
-    this.dialogService = dialogService;
     this.moyKlassClient = moyKlassClient;
     this.userStateRepository = userStateRepository;
     this.objectMapper = objectMapper;
@@ -122,10 +110,6 @@ public class MaxBotService implements ApplicationRunner {
       log.warn("MAX_BOT_TOKEN is empty. Bot will not start long polling.");
       return;
     }
-    if (properties.getMax().getAdminUserIdAsLong() <= 0) {
-      log.warn("MAX_ADMIN_USER_ID is not set. Admin features will be disabled.");
-    }
-
     if (properties.getMax().isWebhookEnabled()) {
       log.info("MAX webhook mode enabled. Long polling is disabled.");
     } else {
@@ -941,20 +925,7 @@ public class MaxBotService implements ApplicationRunner {
       return;
     }
 
-    if (isAdmin(senderId)) {
-      boolean hasAdminDialog = getActiveAdminDialog().isPresent();
-      boolean isEditingText = userStateRepository.getState(senderId)
-          .map(state -> STATE_ADMIN_TEXT_EDIT.equals(state.getState()))
-          .orElse(false);
-      if (text.startsWith("/ask") || text.startsWith("/admin") || text.startsWith("/users")
-          || text.startsWith("/add") || hasAdminDialog || isEditingText) {
-        handleAdminMessage(senderId, text);
-      } else {
-        handleUserMessage(senderId, text);
-      }
-    } else {
-      handleUserMessage(senderId, text);
-    }
+    handleUserMessage(senderId, text);
   }
 
   private void handleMessageCallback(JsonNode callback) {
@@ -967,37 +938,12 @@ public class MaxBotService implements ApplicationRunner {
       payload = callback.path("payload").toString();
     }
 
-    String callbackId = callback.path("callback_id").asText(null);
     long userId = callback.path("user").path("user_id").asLong(0);
     if (userId == 0) {
       userId = callback.path("sender").path("user_id").asLong(0);
     }
 
-    if (callbackId != null && !callbackId.isBlank()) {
-      try {
-        maxApiClient.answerCallback(callbackId, Map.of("notification", "Принято"));
-      } catch (Exception e) {
-        log.debug("Failed to answer callback: {}", e.getMessage());
-      }
-    }
-
     if (payload == null) {
-      return;
-    }
-
-    if (payload.startsWith("admin:text:")) {
-      if (isAdmin(userId)) {
-        handleAdminTextCallback(userId, payload);
-      }
-      return;
-    }
-
-    if (payload.startsWith("close_dialog:")) {
-      long dialogId = parseLongSafe(payload.substring("close_dialog:".length()));
-      if (dialogId > 0) {
-        dialogService.closeDialog(dialogId, "по кнопке");
-        botStateRepository.delete(STATE_ADMIN_DIALOG);
-      }
       return;
     }
 
@@ -1052,274 +998,14 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
-  private void handleAdminMessage(long adminId, String text) {
-    UserStateRepository.UserState adminState = userStateRepository.getState(adminId)
-        .orElse(null);
-    if (adminState != null && STATE_ADMIN_TEXT_EDIT.equals(adminState.getState())) {
-      handleAdminTextEdit(adminId, text);
-      return;
-    }
-
-    if (text.startsWith("/admin")) {
-      showAdminMenu(adminId);
-      return;
-    }
-
-    if (text.startsWith("/users")) {
-      handleAdminUsers(adminId, text);
-      return;
-    }
-
-    if (text.startsWith("/add")) {
-      handleAdminAdd(adminId, text);
-      return;
-    }
-
-    if (text.startsWith("/ask")) {
-      String[] parts = text.split("\\s+", 3);
-      if (parts.length < 2) {
-        sendAdminMessage(adminId, "Формат: /ask <номер телефона> [ФИО ребенка]");
-        return;
-      }
-      String target = parts[1];
-      String digits = target.replaceAll("\\D", "");
-      long userId = -1;
-      if (digits.length() >= 10) {
-        MoyKlassResult lookup;
-        if (parts.length >= 3 && !parts[2].isBlank()) {
-          lookup = moyKlassClient.resolveMaxUserIdByPhoneAndName(digits, parts[2]);
-        } else {
-          lookup = moyKlassClient.resolveMaxUserIdByPhone(digits);
-        }
-        if (!lookup.isSuccess()) {
-          sendAdminMessage(adminId, lookup.getMessage());
-          return;
-        }
-        userId = parseLongSafe(lookup.getData());
-      } else {
-        userId = parseLongSafe(target);
-      }
-
-      if (userId <= 0) {
-        sendAdminMessage(adminId, "Не смог распознать номер телефона или user_id: " + parts[1]);
-        return;
-      }
-      String intro = "";
-      DialogRecord dialog = dialogService.startDialog(userId, adminId, intro);
-      botStateRepository.set(STATE_ADMIN_DIALOG, String.valueOf(dialog.getId()));
-      sendAdminMessageWithClose(adminId, "Диалог начат с пользователем " + userId + ".", dialog.getId());
-      return;
-    }
-
-    Optional<Long> currentDialogId = botStateRepository.get(STATE_ADMIN_DIALOG)
-        .map(this::parseLongSafe)
-        .filter(id -> id > 0);
-
-    if (currentDialogId.isEmpty()) {
-      sendAdminMessage(adminId, "Нет активного диалога. Используйте /ask <user_id>.");
-      return;
-    }
-
-    DialogRecord dialog = dialogRepository.findById(currentDialogId.get()).orElse(null);
-    if (dialog == null || !dialog.isActive()) {
-      sendAdminMessage(adminId, "Диалог уже завершен. Используйте /ask <user_id>.");
-      botStateRepository.delete(STATE_ADMIN_DIALOG);
-      return;
-    }
-
-    dialogService.forwardAdminMessage(dialog, text);
-  }
-
-  private void handleAdminUsers(long adminId, String text) {
-    int pageSize = 20;
-    int page = 1;
-    String[] parts = text == null ? new String[0] : text.trim().split("\\s+");
-    if (parts.length >= 2) {
-      try {
-        page = Integer.parseInt(parts[1].trim());
-      } catch (NumberFormatException e) {
-        sendAdminMessage(adminId, "Формат: /users [номер страницы]");
-        return;
-      }
-    }
-    if (page < 1) {
-      sendAdminMessage(adminId, "Номер страницы должен быть >= 1.");
-      return;
-    }
-
-    int total = userRepository.countUsers();
-    if (total <= 0) {
-      sendAdminMessage(adminId, "Пользователей пока нет.");
-      return;
-    }
-    int totalPages = (total + pageSize - 1) / pageSize;
-    if (page > totalPages) {
-      sendAdminMessage(adminId, "Страница вне диапазона. Доступно страниц: " + totalPages + ".");
-      return;
-    }
-
-    int offset = (page - 1) * pageSize;
-    List<UserRecord> users = userRepository.listUsersPage(offset, pageSize);
-
-    StringBuilder out = new StringBuilder();
-    out.append("Пользователи (стр ")
-        .append(page)
-        .append("/")
-        .append(totalPages)
-        .append(", всего ")
-        .append(total)
-        .append("):");
-
-    for (UserRecord user : users) {
-      out.append("\n").append(formatUserLine(user));
-    }
-
-    if (page < totalPages) {
-      out.append("\n\nСледующая страница: /users ").append(page + 1);
-    }
-    if (page > 1) {
-      out.append("\nПредыдущая страница: /users ").append(page - 1);
-    }
-
-    sendAdminMessage(adminId, out.toString());
-  }
-
-  private void handleAdminAdd(long adminId, String text) {
-    String[] parts = text == null ? new String[0] : text.trim().split("\\s+");
-    if (parts.length < 2) {
-      sendAdminMessage(adminId, "Формат: /add <user_id>");
-      return;
-    }
-    long userId = parseLongSafe(parts[1]);
-    if (userId <= 0) {
-      sendAdminMessage(adminId, "Не смог распознать user_id: " + parts[1]);
-      return;
-    }
-    adminUserRepository.addAdmin(userId, Instant.now().toEpochMilli());
-    sendAdminMessage(adminId, "Админ добавлен: " + userId);
-  }
-
-  private void handleAdminTextCallback(long adminId, String payload) {
-    if ("admin:text:menu".equals(payload)) {
-      showAdminTextMenu(adminId);
-      return;
-    }
-    if ("admin:text:back".equals(payload)) {
-      showAdminMenu(adminId);
-      return;
-    }
-    if (payload.startsWith("admin:text:set:")) {
-      String key = payload.substring("admin:text:set:".length());
-      AdminTextOption option = findAdminTextOption(key);
-      if (option == null) {
-        sendAdminMessage(adminId, "Неизвестный раздел для изменения текста.");
-        return;
-      }
-      userStateRepository.setState(
-          adminId,
-          STATE_ADMIN_TEXT_EDIT,
-          key,
-          Instant.now().toEpochMilli()
-      );
-      sendAdminMessage(adminId, "Введите новый текст для: " + option.label);
-      return;
-    }
-  }
-
-  private void handleAdminTextEdit(long adminId, String text) {
-    String newText = text == null ? "" : text.trim();
-    UserStateRepository.UserState adminState = userStateRepository.getState(adminId)
-        .orElse(null);
-    if (adminState == null || adminState.getData() == null || adminState.getData().isBlank()) {
-      userStateRepository.clearState(adminId);
-      sendAdminMessage(adminId, "Не удалось определить раздел. Попробуйте снова.");
-      return;
-    }
-    if (newText.isBlank()) {
-      sendAdminMessage(adminId, "Текст не может быть пустым. Введите новый текст.");
-      return;
-    }
-    String key = adminState.getData();
-    botTextRepository.upsertText(key, newText, Instant.now().toEpochMilli());
-    userStateRepository.clearState(adminId);
-    sendAdminMessage(adminId, "Текст обновлен.");
-    showAdminMenu(adminId);
-  }
-
-  private void showAdminMenu(long adminId) {
-    String url = properties.getAdmin().getPanelUrl();
-    if (url == null || url.isBlank()) {
-      url = "http://<ваш-домен>/admin/index.html";
-    }
-    sendAdminMessage(adminId, "Добро пожаловать в Админ-панель"
-        + "\nСписок пользователей: /users [страница]"
-        + "\nДобавить админа: /add <user_id>",
-        buildAdminMenuAttachments());
-  }
-
-  private void showAdminTextMenu(long adminId) {
-    sendAdminMessage(adminId, "Выберите где изменить текст", buildAdminTextMenuAttachments());
-  }
-
-  private AdminTextOption findAdminTextOption(String key) {
-    for (AdminTextOption option : adminTextOptions()) {
-      if (option.key.equals(key)) {
-        return option;
-      }
-    }
-    return null;
-  }
-
-  private List<AdminTextOption> adminTextOptions() {
-    return List.of(
-        new AdminTextOption(TEXT_WELCOME, "В стартовом меню"),
-        new AdminTextOption(TEXT_SIGNUP_REDIRECT, "В Записаться"),
-        new AdminTextOption(TEXT_AUTH_PROMPT, "В Авторизоваться"),
-        new AdminTextOption(TEXT_LINK_PROMPT, "После записи"),
-        new AdminTextOption(TEXT_FIRST_AUTH_NOTICE, "Первое уведомление")
-    );
-  }
-
-  private List<Map<String, Object>> buildAdminMenuAttachments() {
-    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
-    rows.add(List.of(callbackButton("Изменить текст", "admin:text:menu")));
-    rows.add(List.of(callbackButton("В меню", "action:menu")));
-    return List.of(Map.of(
-        "type", "inline_keyboard",
-        "payload", Map.of("buttons", rows)
-    ));
-  }
-
-  private List<Map<String, Object>> buildAdminTextMenuAttachments() {
-    List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
-    for (AdminTextOption option : adminTextOptions()) {
-      rows.add(List.of(callbackButton(option.label, "admin:text:set:" + option.key)));
-    }
-    rows.add(List.of(callbackButton("Назад", "admin:text:back")));
-    return List.of(Map.of(
-        "type", "inline_keyboard",
-        "payload", Map.of("buttons", rows)
-    ));
-  }
-
-  private Optional<DialogRecord> getActiveAdminDialog() {
-    Optional<Long> currentDialogId = botStateRepository.get(STATE_ADMIN_DIALOG)
-        .map(this::parseLongSafe)
-        .filter(id -> id > 0);
-    if (currentDialogId.isEmpty()) {
-      return Optional.empty();
-    }
-    return dialogRepository.findById(currentDialogId.get()).filter(DialogRecord::isActive);
-  }
-
   private void handleUserMessage(long userId, String text) {
-    DialogRecord dialog = dialogRepository.findActiveByUserId(userId).orElse(null);
-    if (dialog != null && dialog.isActive()) {
-      dialogService.forwardUserMessage(dialog, text);
+    UserStateRepository.UserState state = userStateRepository.getState(userId).orElse(null);
+    if (text.equalsIgnoreCase("В меню") || text.contains("меню") || text.contains("Меню")) {
+      userStateRepository.clearState(userId);
+      sendWelcome(userId);
       return;
     }
 
-    UserStateRepository.UserState state = userStateRepository.getState(userId).orElse(null);
     if (state != null) {
       if (STATE_SIGNUP_CHOICE.equals(state.getState())) {
         handleSignupChoice(userId, text);
@@ -1339,6 +1025,18 @@ public class MaxBotService implements ApplicationRunner {
           || STATE_SIGNUP_FILIAL_PICK.equals(state.getState())
           || STATE_SIGNUP_CLASS_PICK.equals(state.getState())) {
         handleNewSignupRedirect(userId);
+        return;
+      }
+      if (STATE_PASSES_TARGET_PICK.equals(state.getState())) {
+        handlePassesMessageTarget(userId, text);
+        return;
+      }
+      if (STATE_INVOICE_TARGET_PICK.equals(state.getState())) {
+        handleInvoiceMessageTarget(userId, text);
+        return;
+      }
+      if (STATE_REMOVE_CHILD_PICK.equals(state.getState())) {
+        handleRemoveChildMessageTarget(userId, text);
         return;
       }
     }
@@ -1365,6 +1063,16 @@ public class MaxBotService implements ApplicationRunner {
 
     if (text.equalsIgnoreCase("Счет на оплату") || text.contains("Счет")) {
       promptInvoiceTarget(userId);
+      return;
+    }
+
+    if (text.contains("Добавить ребенка")) {
+      startSignupPhoneFlow(userId);
+      return;
+    }
+
+    if (text.contains("Удалить ребенка")) {
+      showRemoveChildMenu(userId);
       return;
     }
 
@@ -1641,34 +1349,6 @@ public class MaxBotService implements ApplicationRunner {
     sendMenuMessage(userId, response);
   }
 
-  private void sendAdminMessage(long adminId, String text) {
-    if (adminId <= 0) {
-      return;
-    }
-    sendUserMessage(adminId, text);
-  }
-
-  private void sendAdminMessage(long adminId, String text, List<Map<String, Object>> attachments) {
-    if (adminId <= 0) {
-      return;
-    }
-    sendUserMessageWithAttachments(adminId, text, attachments);
-  }
-
-  private void sendAdminMessageWithClose(long adminId, String text, long dialogId) {
-    if (adminId <= 0) {
-      return;
-    }
-    try {
-      maxApiClient.sendMessageToUser(adminId, Map.of(
-          "text", text,
-          "attachments", keyboardFactory.closeDialogAttachments(dialogId)
-      ));
-    } catch (Exception e) {
-      log.warn("Failed to send admin message with close button: {}", e.getMessage());
-    }
-  }
-
   private void sendUserMessage(long userId, String text) {
     try {
       maxApiClient.sendMessageToUser(userId, Map.of("text", text));
@@ -1725,6 +1405,7 @@ public class MaxBotService implements ApplicationRunner {
       handlePassesForChild(userId, children.get(0).getMoyklassUserId());
       return;
     }
+    userStateRepository.setState(userId, STATE_PASSES_TARGET_PICK, null, Instant.now().toEpochMilli());
     sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "passes"));
   }
 
@@ -1742,7 +1423,38 @@ public class MaxBotService implements ApplicationRunner {
       handleInvoiceForChild(userId, children.get(0).getMoyklassUserId());
       return;
     }
+    userStateRepository.setState(userId, STATE_INVOICE_TARGET_PICK, null, Instant.now().toEpochMilli());
     sendUserMessageWithAttachments(userId, "Для кого вывести информацию?", buildTargetAttachments(children, "invoice"));
+  }
+
+  private void handlePassesMessageTarget(long userId, String text) {
+    if (text != null && text.toLowerCase(Locale.ROOT).contains("для всех")) {
+      userStateRepository.clearState(userId);
+      handlePassesForAll(userId);
+      return;
+    }
+    long childId = extractChildIdFromButtonText(text);
+    if (childId > 0) {
+      userStateRepository.clearState(userId);
+      handlePassesForChild(userId, childId);
+      return;
+    }
+    sendUserMessage(userId, "Выберите ребенка кнопкой ниже.");
+  }
+
+  private void handleInvoiceMessageTarget(long userId, String text) {
+    if (text != null && text.toLowerCase(Locale.ROOT).contains("для всех")) {
+      userStateRepository.clearState(userId);
+      handleInvoiceForAll(userId);
+      return;
+    }
+    long childId = extractChildIdFromButtonText(text);
+    if (childId > 0) {
+      userStateRepository.clearState(userId);
+      handleInvoiceForChild(userId, childId);
+      return;
+    }
+    sendUserMessage(userId, "Выберите ребенка кнопкой ниже.");
   }
 
   private void handlePassesPayload(long userId, String payload) {
@@ -1891,11 +1603,22 @@ public class MaxBotService implements ApplicationRunner {
       );
       return;
     }
+    userStateRepository.setState(userId, STATE_REMOVE_CHILD_PICK, null, Instant.now().toEpochMilli());
     sendUserMessageWithAttachments(
         userId,
         "Выберите, какого ребенка нужно отвязать от учетной записи",
         buildRemoveChildrenAttachments(children)
     );
+  }
+
+  private void handleRemoveChildMessageTarget(long userId, String text) {
+    long childId = extractChildIdFromButtonText(text);
+    if (childId > 0) {
+      userStateRepository.clearState(userId);
+      handleChildRemove(userId, childId);
+      return;
+    }
+    sendUserMessage(userId, "Выберите ребенка кнопкой ниже.");
   }
 
   private void handleChildRemove(long userId, long childId) {
@@ -1943,61 +1666,12 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
-  private boolean isAdmin(long userId) {
-    if (userId <= 0) {
-      return false;
-    }
-    if (userId == properties.getMax().getAdminUserIdAsLong()) {
-      return true;
-    }
-    String raw = properties.getMax().getAdminUserId();
-    if (raw != null && !raw.isBlank()) {
-      String[] parts = raw.split("[,\\s]+");
-      for (String part : parts) {
-        if (part == null || part.isBlank()) {
-          continue;
-        }
-        try {
-          if (Long.parseLong(part.trim()) == userId) {
-            return true;
-          }
-        } catch (Exception e) {
-          // ignore invalid ids
-        }
-      }
-    }
-    return adminUserRepository.isAdmin(userId);
-  }
-
   private long parseLongSafe(String value) {
     try {
       return Long.parseLong(value);
     } catch (Exception e) {
       return -1L;
     }
-  }
-
-  private String formatUserLine(UserRecord user) {
-    if (user == null) {
-      return "Без имени — id ?";
-    }
-    String first = user.getFirstName() == null ? "" : user.getFirstName().trim();
-    String last = user.getLastName() == null ? "" : user.getLastName().trim();
-    String name;
-    if (!first.isBlank() && !last.isBlank()) {
-      name = first + " " + last;
-    } else if (!first.isBlank()) {
-      name = first;
-    } else if (!last.isBlank()) {
-      name = last;
-    } else {
-      name = "Без имени";
-    }
-    String username = user.getUsername() == null ? "" : user.getUsername().trim();
-    if (!username.isBlank()) {
-      name = name + " (@" + username + ")";
-    }
-    return name + " — id " + user.getMaxUserId();
   }
 
   private boolean isNoProfileMessage(String message) {
@@ -2124,9 +1798,9 @@ public class MaxBotService implements ApplicationRunner {
 
   private List<Map<String, Object>> buildChildrenAttachments(List<UserChildRepository.UserChild> children) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
-    rows.add(List.of(callbackButton("➕ Добавить ребенка", "action:add_child")));
-    rows.add(List.of(callbackButton("- Удалить ребенка", "action:remove_child")));
-    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    rows.add(List.of(messageButton("➕ Добавить ребенка", "action:add_child")));
+    rows.add(List.of(messageButton("- Удалить ребенка", "action:remove_child")));
+    rows.add(List.of(messageButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",
         "payload", Map.of("buttons", rows)
@@ -2136,52 +1810,55 @@ public class MaxBotService implements ApplicationRunner {
   private List<Map<String, Object>> buildRemoveChildrenAttachments(List<UserChildRepository.UserChild> children) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
     for (UserChildRepository.UserChild child : children) {
-      String label = child.getChildName() == null || child.getChildName().isBlank()
-          ? "Ребенок " + child.getMoyklassUserId()
-          : child.getChildName();
-      rows.add(List.of(callbackButton(label, "child:remove:" + child.getMoyklassUserId())));
+      String label = childButtonLabel(child);
+      rows.add(List.of(messageButton(label, "child:remove:" + child.getMoyklassUserId())));
     }
-    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    rows.add(List.of(messageButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",
         "payload", Map.of("buttons", rows)
     ));
-  }
-
-  private static class AdminTextOption {
-    private final String key;
-    private final String label;
-
-    private AdminTextOption(String key, String label) {
-      this.key = key;
-      this.label = label;
-    }
   }
 
   private List<Map<String, Object>> buildTargetAttachments(List<UserChildRepository.UserChild> children, String prefix) {
     List<List<Map<String, Object>>> rows = new java.util.ArrayList<>();
     for (UserChildRepository.UserChild child : children) {
-      String label = child.getChildName() == null || child.getChildName().isBlank()
-          ? "Ребенок " + child.getMoyklassUserId()
-          : child.getChildName();
-      rows.add(List.of(callbackButton(label, prefix + ":child:" + child.getMoyklassUserId())));
+      String label = childButtonLabel(child);
+      rows.add(List.of(messageButton(label, prefix + ":child:" + child.getMoyklassUserId())));
     }
     if (children.size() > 1) {
-      rows.add(List.of(callbackButton("Для всех", prefix + ":all")));
+      rows.add(List.of(messageButton("Для всех", prefix + ":all")));
     }
-    rows.add(List.of(callbackButton("🏠 В меню", "action:menu")));
+    rows.add(List.of(messageButton("🏠 В меню", "action:menu")));
     return List.of(Map.of(
         "type", "inline_keyboard",
         "payload", Map.of("buttons", rows)
     ));
   }
 
-  private Map<String, Object> callbackButton(String text, String payload) {
+  private Map<String, Object> messageButton(String text, String payload) {
     return Map.of(
-        "type", "callback",
-        "text", text,
-        "payload", payload
+        "type", "message",
+        "text", text
     );
+  }
+
+  private String childButtonLabel(UserChildRepository.UserChild child) {
+    String label = child.getChildName() == null || child.getChildName().isBlank()
+        ? "Ребенок"
+        : child.getChildName();
+    return label + " #" + child.getMoyklassUserId();
+  }
+
+  private long extractChildIdFromButtonText(String text) {
+    if (text == null) {
+      return -1L;
+    }
+    java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("#(\\d+)\\s*$").matcher(text.trim());
+    if (!matcher.find()) {
+      return -1L;
+    }
+    return parseLongSafe(matcher.group(1));
   }
 
   private String getText(String key, String fallback) {
@@ -2192,14 +1869,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void sendAuthNoticeIfNewChildren(long userId, int beforeCount) {
-    int afterCount = userChildRepository.listChildren(userId).size();
-    if (afterCount <= beforeCount) {
-      return;
-    }
-    String text = getText(TEXT_FIRST_AUTH_NOTICE, "Здесь текст для первого уведомления");
-    if (text != null && !text.isBlank()) {
-      sendUserMessage(userId, text);
-    }
+    // First authorization notice is intentionally disabled.
   }
 
   private String safeText(String text) {

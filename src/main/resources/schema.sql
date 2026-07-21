@@ -13,23 +13,6 @@ CREATE TABLE IF NOT EXISTS users (
   last_seen INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS dialogs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  admin_id INTEGER NOT NULL,
-  active INTEGER NOT NULL,
-  started_at INTEGER NOT NULL,
-  ended_at INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  dialog_id INTEGER NOT NULL,
-  from_role TEXT NOT NULL,
-  text TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS user_states (
   max_user_id INTEGER PRIMARY KEY,
   state TEXT NOT NULL,
@@ -52,17 +35,7 @@ CREATE TABLE IF NOT EXISTS bot_texts (
   updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS user_notifications (
-  max_user_id INTEGER PRIMARY KEY,
-  first_auth_sent INTEGER NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS lesson_notifications (
   record_id INTEGER PRIMARY KEY,
   notified_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS admin_users (
-  max_user_id INTEGER PRIMARY KEY,
-  created_at INTEGER NOT NULL
 );

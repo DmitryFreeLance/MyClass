@@ -1,10 +1,9 @@
 # MAX бот для МойКласс
 
-Бот для мессенджера MAX (long polling) с:
-- стартовым сообщением и кнопками (callback)
+Бот для мессенджера MAX с:
+- стартовым сообщением и message-кнопками
 - сценариями: Записаться, Абонементы, Счет на оплату
-- живым диалогом между пользователем и администратором
-- админ‑панелью
+- публичным сайтом записи
 - хранением состояния в SQLite
 
 ## Быстрый старт
@@ -13,9 +12,6 @@
 
 Обязательные:
 - `MAX_BOT_TOKEN` — токен бота MAX
-- `MAX_ADMIN_USER_ID` — user_id администратора в MAX
-- `ADMIN_PANEL_TOKEN` — токен для доступа к админ‑панели
-- `ADMIN_PANEL_URL` — (необязательно) ссылка на админ‑панель для команды `/admin`
 
 Опциональные:
 - `MAX_API_BASE_URL` — по умолчанию `https://platform-api2.max.ru`
@@ -45,8 +41,6 @@ docker build -t myclass .
 docker run -d --name myclass --restart unless-stopped \
   -p 8081:8080 \
   -e MAX_BOT_TOKEN=YOUR_TOKEN \
-  -e MAX_ADMIN_USER_ID=123456,789012 \
-  -e ADMIN_PANEL_TOKEN=secret \
   -e MOYKLASS_ENABLED=true \
   -e MOYKLASS_TOKEN=YOUR_MOYKLASS_TOKEN \
   -e MAX_WEBHOOK_ENABLED=true \
@@ -61,21 +55,6 @@ docker run -d --name myclass --restart unless-stopped \
   -v myclass-data:/data \
   myclass
 ```
-
-## Админ‑панель
-
-Откройте `http://localhost:8081/admin/index.html`, введите `ADMIN_PANEL_TOKEN`.
-
-Возможности:
-- просмотреть активные диалоги
-- запустить диалог с пользователем (аналог `/ask`)
-- завершить диалог
-
-## Команды администратора в MAX
-
-- `/ask <user_id> [сообщение]` — начинает диалог с пользователем и делает его текущим.
-- После запуска все сообщения администратора отправляются этому пользователю до завершения.
-- К каждому сообщению админа бот присылает кнопку **Завершить диалог**.
 
 ## Интеграция с МойКласс
 
@@ -108,6 +87,5 @@ docker run -d --name myclass --restart unless-stopped \
 ## Файлы
 
 - `src/main/java/com/myclass/maxbot/MaxBotService.java` — long polling + обработка команд
-- `src/main/java/com/myclass/maxbot/DialogService.java` — логика живого диалога
-- `src/main/resources/static/admin/*` — админ‑панель
+- `src/main/resources/static/*` — публичный сайт записи
 - `src/main/resources/schema.sql` — структура SQLite

@@ -13,10 +13,10 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> mainMenuAttachments(boolean linked) {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
-    rows.add(List.of(button("callback", "🔐 Авторизоваться", "action:auth")));
-    rows.add(List.of(button("callback", "🎟️ Абонементы", "action:passes")));
-    rows.add(List.of(button("callback", "💳 Счет на оплату", "action:invoice")));
+    rows.add(List.of(messageButton("📝 Записаться")));
+    rows.add(List.of(messageButton("🔐 Авторизоваться")));
+    rows.add(List.of(messageButton("🎟️ Абонементы")));
+    rows.add(List.of(messageButton("💳 Счет на оплату")));
     rows.add(List.of(linkButton("💬 Задать вопрос", contactUrl())));
 
     return List.of(Map.of(
@@ -27,17 +27,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> menuOnlyAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "🏠 В меню", "action:menu")));
-
-    return List.of(Map.of(
-        "type", "inline_keyboard",
-        "payload", Map.of("buttons", rows)
-    ));
-  }
-
-  public List<Map<String, Object>> closeDialogAttachments(long dialogId) {
-    List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "Завершить диалог", "close_dialog:" + dialogId)));
+    rows.add(List.of(messageButton("🏠 В меню")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -48,8 +38,8 @@ public class KeyboardFactory {
   public List<Map<String, Object>> signupChoiceAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
     rows.add(List.of(
-        button("callback", "✅ Да, уже зарегистрирован(а)", "signup:existing_yes"),
-        button("callback", "🆕 Нет, я новый", "signup:existing_no")
+        messageButton("✅ Да, уже зарегистрирован(а)"),
+        messageButton("🆕 Нет, я новый")
     ));
 
     return List.of(Map.of(
@@ -60,8 +50,8 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> signupMenuAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
-    rows.add(List.of(button("callback", "🏠 В меню", "action:menu")));
+    rows.add(List.of(messageButton("📝 Записаться")));
+    rows.add(List.of(messageButton("🏠 В меню")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -71,7 +61,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> linkAccountAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(button("callback", "Авторизоваться", "action:link")));
+    rows.add(List.of(messageButton("Авторизоваться")));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -89,11 +79,10 @@ public class KeyboardFactory {
     ));
   }
 
-  private Map<String, Object> button(String type, String text, String payload) {
+  private Map<String, Object> messageButton(String text) {
     return Map.of(
-        "type", type,
-        "text", text,
-        "payload", payload
+        "type", "message",
+        "text", text
     );
   }
 

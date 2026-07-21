@@ -5,7 +5,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "bot")
 public class BotProperties {
   private Max max = new Max();
-  private Admin admin = new Admin();
   private Site site = new Site();
   private Moyklass moyklass = new Moyklass();
 
@@ -15,14 +14,6 @@ public class BotProperties {
 
   public void setMax(Max max) {
     this.max = max;
-  }
-
-  public Admin getAdmin() {
-    return admin;
-  }
-
-  public void setAdmin(Admin admin) {
-    this.admin = admin;
   }
 
   public Site getSite() {
@@ -44,7 +35,6 @@ public class BotProperties {
   public static class Max {
     private String baseUrl;
     private String token;
-    private String adminUserId;
     private boolean webhookEnabled;
     private int longPollTimeoutSec;
     private int longPollLimit;
@@ -63,26 +53,6 @@ public class BotProperties {
 
     public void setToken(String token) {
       this.token = token;
-    }
-
-    public String getAdminUserId() {
-      return adminUserId;
-    }
-
-    public void setAdminUserId(String adminUserId) {
-      this.adminUserId = adminUserId;
-    }
-
-    public long getAdminUserIdAsLong() {
-      if (adminUserId == null || adminUserId.isBlank()) {
-        return 0L;
-      }
-      String first = adminUserId.split("[,\\s]+")[0];
-      try {
-        return Long.parseLong(first.trim());
-      } catch (Exception e) {
-        return 0L;
-      }
     }
 
     public int getLongPollTimeoutSec() {
@@ -107,27 +77,6 @@ public class BotProperties {
 
     public void setWebhookEnabled(boolean webhookEnabled) {
       this.webhookEnabled = webhookEnabled;
-    }
-  }
-
-  public static class Admin {
-    private String panelToken;
-    private String panelUrl;
-
-    public String getPanelToken() {
-      return panelToken;
-    }
-
-    public void setPanelToken(String panelToken) {
-      this.panelToken = panelToken;
-    }
-
-    public String getPanelUrl() {
-      return panelUrl;
-    }
-
-    public void setPanelUrl(String panelUrl) {
-      this.panelUrl = panelUrl;
     }
   }
 

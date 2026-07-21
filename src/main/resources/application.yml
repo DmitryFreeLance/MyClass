@@ -14,13 +14,9 @@ bot:
   max:
     base-url: ${MAX_API_BASE_URL:https://platform-api2.max.ru}
     token: ${MAX_BOT_TOKEN:}
-    admin-user-id: ${MAX_ADMIN_USER_ID:0}
     webhook-enabled: ${MAX_WEBHOOK_ENABLED:false}
     long-poll-timeout-sec: ${MAX_LONG_POLL_TIMEOUT_SEC:25}
     long-poll-limit: ${MAX_LONG_POLL_LIMIT:100}
-  admin:
-    panel-token: ${ADMIN_PANEL_TOKEN:}
-    panel-url: ${ADMIN_PANEL_URL:}
   site:
     registration-url: ${SITE_REGISTRATION_URL:https://roboacademiya.ru/}
     contact-url: ${SITE_CONTACT_URL:https://max.ru/id246516134480_2_bot}

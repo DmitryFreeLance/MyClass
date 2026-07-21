@@ -67,12 +67,6 @@ public class MaxApiClient {
     return postJson(url, body);
   }
 
-  public JsonNode answerCallback(String callbackId, Map<String, Object> body)
-      throws IOException, InterruptedException {
-    String url = baseUrl + "/answers?callback_id=" + encode(callbackId);
-    return postJson(url, body);
-  }
-
   private JsonNode postJson(String url, Map<String, Object> body) throws IOException, InterruptedException {
     String json = objectMapper.writeValueAsString(body);
     return postJsonWithAuth(url, json, "Max API POST failed");
