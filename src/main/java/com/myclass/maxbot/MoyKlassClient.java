@@ -3,6 +3,8 @@ package com.myclass.maxbot;
 public interface MoyKlassClient {
   MoyKlassResult createLead(long maxUserId, String note, SignupData data);
 
+  MoyKlassResult createSiteLead(SiteSignupData data);
+
   java.util.List<Filial> listFilials();
 
   java.util.List<ClassGroup> listClasses();
@@ -140,6 +142,48 @@ public interface MoyKlassClient {
 
     public String getChildName() {
       return childName;
+    }
+
+    public String getPhone() {
+      return phone;
+    }
+
+    public String getEmail() {
+      return email;
+    }
+
+    public Long getFilialId() {
+      return filialId;
+    }
+
+    public Long getClassId() {
+      return classId;
+    }
+  }
+
+  class SiteSignupData {
+    private final String childName;
+    private final String parentName;
+    private final String phone;
+    private final String email;
+    private final Long filialId;
+    private final Long classId;
+
+    public SiteSignupData(String childName, String parentName, String phone, String email, Long filialId, Long classId) {
+      this.childName = childName;
+      this.parentName = parentName;
+      this.phone = phone;
+      this.email = email;
+      this.filialId = filialId;
+      this.classId = classId;
+    }
+
+    public String getChildName() {
+      return childName;
+    }
+
+    public String getParentName() {
+      return parentName;
     }
 
     public String getPhone() {

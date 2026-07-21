@@ -1082,7 +1082,7 @@ public class MaxBotService implements ApplicationRunner {
         return;
       }
       String target = parts[1];
-      String digits = target.replaceAll("\\\\D", "");
+      String digits = target.replaceAll("\\D", "");
       long userId = -1;
       if (digits.length() >= 10) {
         MoyKlassResult lookup;
@@ -1505,7 +1505,7 @@ public class MaxBotService implements ApplicationRunner {
   }
 
   private void handleSignupPhoneNew(long userId, String text) {
-    String phone = text == null ? "" : text.replaceAll("\\\\D", "");
+    String phone = text == null ? "" : text.replaceAll("\\D", "");
     if (phone.length() < 10) {
       sendSignupMenuMessage(userId, "Не смог распознать номер. Введите номер телефона цифрами.");
       return;
@@ -2026,7 +2026,7 @@ public class MaxBotService implements ApplicationRunner {
     if (value == null) {
       return null;
     }
-    String digits = value.replaceAll("\\\\D", "");
+    String digits = value.replaceAll("\\D", "");
     return digits.isBlank() ? null : digits;
   }
 

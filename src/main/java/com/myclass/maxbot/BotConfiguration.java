@@ -12,7 +12,7 @@ public class BotConfiguration {
   }
 
   @Bean
-  public KeyboardFactory keyboardFactory() {
-    return new KeyboardFactory();
+  public KeyboardFactory keyboardFactory(BotProperties properties) {
+    return new KeyboardFactory(properties);
   }
 }

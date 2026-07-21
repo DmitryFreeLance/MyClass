@@ -21,12 +21,16 @@ bot:
   admin:
     panel-token: ${ADMIN_PANEL_TOKEN:}
     panel-url: ${ADMIN_PANEL_URL:}
+  site:
+    registration-url: ${SITE_REGISTRATION_URL:https://roboacademiya.ru/}
+    contact-url: ${SITE_CONTACT_URL:https://max.ru/id246516134480_2_bot}
   moyklass:
     enabled: ${MOYKLASS_ENABLED:false}
     base-url: ${MOYKLASS_BASE_URL:}
     token: ${MOYKLASS_TOKEN:}
     timeout-sec: ${MOYKLASS_TIMEOUT_SEC:15}
     lead-state-id: ${MOYKLASS_LEAD_STATE_ID:}
+    join-status-id: ${MOYKLASS_JOIN_STATUS_ID:2}
     allowed-client-state-ids: ${MOYKLASS_ALLOWED_CLIENT_STATE_IDS:}
     max-id-attribute-alias: ${MOYKLASS_MAX_ID_ATTR_ALIAS:}
     parent-name-attribute-alias: ${MOYKLASS_PARENT_NAME_ATTR_ALIAS:}

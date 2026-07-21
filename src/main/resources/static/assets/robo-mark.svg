@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Roboacademiya">
+  <rect width="160" height="160" rx="28" fill="#f9f7f1"/>
+  <path d="M41 88c0-22 16-38 39-38s39 16 39 38v24c0 10-8 18-18 18H59c-10 0-18-8-18-18V88Z" fill="#255f85"/>
+  <path d="M56 88c0-13 10-23 24-23s24 10 24 23v19c0 6-5 11-11 11H67c-6 0-11-5-11-11V88Z" fill="#ffffff"/>
+  <circle cx="70" cy="92" r="7" fill="#f2a33a"/>
+  <circle cx="90" cy="92" r="7" fill="#36a169"/>
+  <path d="M68 108h24" stroke="#255f85" stroke-width="6" stroke-linecap="round"/>
+  <path d="M80 50V33" stroke="#255f85" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="80" cy="27" r="9" fill="#f2a33a"/>
+  <path d="M39 78H25M135 78h-14" stroke="#255f85" stroke-width="8" stroke-linecap="round"/>
+</svg>

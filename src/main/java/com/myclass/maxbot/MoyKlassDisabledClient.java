@@ -13,6 +13,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassResult createSiteLead(SiteSignupData data) {
+    log.warn("MoyKlass integration disabled; createSiteLead skipped");
+    return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");
+  }
+
+  @Override
   public java.util.List<Filial> listFilials() {
     log.warn("MoyKlass integration disabled; listFilials skipped");
     return java.util.List.of();

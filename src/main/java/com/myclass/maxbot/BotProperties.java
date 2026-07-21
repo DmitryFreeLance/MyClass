@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class BotProperties {
   private Max max = new Max();
   private Admin admin = new Admin();
+  private Site site = new Site();
   private Moyklass moyklass = new Moyklass();
 
   public Max getMax() {
@@ -22,6 +23,14 @@ public class BotProperties {
 
   public void setAdmin(Admin admin) {
     this.admin = admin;
+  }
+
+  public Site getSite() {
+    return site;
+  }
+
+  public void setSite(Site site) {
+    this.site = site;
   }
 
   public Moyklass getMoyklass() {
@@ -122,12 +131,34 @@ public class BotProperties {
     }
   }
 
+  public static class Site {
+    private String registrationUrl;
+    private String contactUrl;
+
+    public String getRegistrationUrl() {
+      return registrationUrl;
+    }
+
+    public void setRegistrationUrl(String registrationUrl) {
+      this.registrationUrl = registrationUrl;
+    }
+
+    public String getContactUrl() {
+      return contactUrl;
+    }
+
+    public void setContactUrl(String contactUrl) {
+      this.contactUrl = contactUrl;
+    }
+  }
+
   public static class Moyklass {
     private boolean enabled;
     private String baseUrl;
     private String token;
     private int timeoutSec;
     private Long leadStateId;
+    private Long joinStatusId;
     private String maxIdAttributeAlias;
     private String parentNameAttributeAlias;
     private String payLinkBase;
@@ -171,6 +202,14 @@ public class BotProperties {
 
     public void setLeadStateId(Long leadStateId) {
       this.leadStateId = leadStateId;
+    }
+
+    public Long getJoinStatusId() {
+      return joinStatusId;
+    }
+
+    public void setJoinStatusId(Long joinStatusId) {
+      this.joinStatusId = joinStatusId;
     }
 
     public String getMaxIdAttributeAlias() {

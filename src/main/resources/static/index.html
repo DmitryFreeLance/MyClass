@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Робоакадемия - запись на занятия</title>
+    <link rel="stylesheet" href="/signup.css">
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="intro">
+        <div class="brand">
+          <img src="/assets/robo-mark.svg" alt="" class="brand-mark">
+          <div>
+            <p class="eyebrow">Робоакадемия</p>
+            <h1>Запись на занятия</h1>
+          </div>
+        </div>
+        <p class="lead">Выберите детский сад, направление и группу. После заявки мы сохраним запись в МойКласс.</p>
+        <a class="contact-link" id="contactTop" href="https://max.ru/id246516134480_2_bot" target="_blank" rel="noopener">Задать вопрос в MAX</a>
+      </section>
+
+      <section class="signup-panel" aria-label="Форма записи">
+        <div class="filters">
+          <label>
+            <span>Детский сад</span>
+            <select id="filialSelect">
+              <option value="">Загрузка...</option>
+            </select>
+          </label>
+          <label>
+            <span>Направление</span>
+            <select id="courseSelect">
+              <option value="">Все направления</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="groups-header">
+          <h2>Доступные группы</h2>
+          <span id="groupsCount">0</span>
+        </div>
+        <div id="groupsList" class="groups-list" aria-live="polite"></div>
+
+        <form id="signupForm" class="form" novalidate>
+          <input type="hidden" id="selectedClassId">
+          <div class="selected-group" id="selectedGroup">Выберите группу выше</div>
+
+          <div class="fields-grid">
+            <label>
+              <span>ФИО ребенка</span>
+              <input id="childName" name="childName" autocomplete="name" required maxlength="100">
+            </label>
+            <label>
+              <span>ФИО родителя</span>
+              <input id="parentName" name="parentName" autocomplete="name" required maxlength="100">
+            </label>
+            <label>
+              <span>Телефон</span>
+              <input id="phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="+7 999 000-00-00" required>
+            </label>
+            <label>
+              <span>Email</span>
+              <input id="email" name="email" type="email" autocomplete="email" required maxlength="100">
+            </label>
+          </div>
+
+          <label class="check-row">
+            <input id="payLater" type="checkbox">
+            <span>Пока не оплачивать</span>
+          </label>
+          <label class="check-row">
+            <input id="personalConsent" type="checkbox" checked required>
+            <span>Я родитель или законный представитель и даю согласие на обработку персональных данных несовершеннолетнего.</span>
+          </label>
+          <label class="check-row">
+            <input id="marketingConsent" type="checkbox" checked>
+            <span>Я согласен получать информацию о спецпредложениях, акциях и занятиях.</span>
+          </label>
+
+          <button id="submitButton" type="submit" disabled>Выберите группу</button>
+          <p id="formMessage" class="form-message" role="status"></p>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="successDialog">
+      <button class="dialog-close" id="closeDialog" type="button" aria-label="Закрыть">×</button>
+      <h2>Заявка отправлена</h2>
+      <p>Мы записали данные в МойКласс. Для подтверждения можно перейти к оплате или написать нам в MAX.</p>
+      <div class="dialog-actions">
+        <a id="payLink" class="primary-link" href="#" target="_blank" rel="noopener">Перейти к оплате</a>
+        <a id="contactLink" class="secondary-link" href="https://max.ru/id246516134480_2_bot" target="_blank" rel="noopener">Задать вопрос</a>
+      </div>
+    </dialog>
+
+    <script src="/signup.js"></script>
+  </body>
+</html>

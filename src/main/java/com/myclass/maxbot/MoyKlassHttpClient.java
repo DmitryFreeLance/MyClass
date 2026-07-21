@@ -140,6 +140,69 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   @Override
+  public MoyKlassResult createSiteLead(SiteSignupData data) {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return MoyKlassResult.failure("Нет API ключа МойКласс.");
+    }
+    if (data == null) {
+      return MoyKlassResult.failure("Данные заявки не заполнены.");
+    }
+    String childName = trimToNull(data.getChildName());
+    String phone = normalizePhone(data.getPhone());
+    String email = trimToNull(data.getEmail());
+    if (childName == null) {
+      return MoyKlassResult.failure("Укажите ФИО ребенка.");
+    }
+    if (phone == null) {
+      return MoyKlassResult.failure("Укажите корректный телефон.");
+    }
+    if (email == null || !email.contains("@")) {
+      return MoyKlassResult.failure("Укажите корректный email.");
+    }
+    if (data.getFilialId() == null || data.getFilialId() <= 0 || data.getClassId() == null || data.getClassId() <= 0) {
+      return MoyKlassResult.failure("Выберите детский сад и группу.");
+    }
+
+    try {
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("name", childName);
+      payload.put("phone", phone);
+      payload.put("email", email);
+      payload.put("filials", List.of(data.getFilialId()));
+      if (config.getLeadStateId() != null) {
+        payload.put("clientStateId", config.getLeadStateId());
+      }
+
+      List<Map<String, Object>> attributes = new ArrayList<>();
+      String parentAlias = config.getParentNameAttributeAlias();
+      String parentName = trimToNull(data.getParentName());
+      if (parentAlias != null && !parentAlias.isBlank() && parentName != null) {
+        attributes.add(Map.of(
+            "attributeAlias", normalizeAttributeAlias(parentAlias),
+            "value", parentName
+        ));
+      }
+      if (!attributes.isEmpty()) {
+        payload.put("attributes", attributes);
+      }
+
+      JsonNode created = postJson("/v1/company/users", payload);
+      long moyklassUserId = created.path("id").asLong(0);
+      if (moyklassUserId <= 0) {
+        return MoyKlassResult.failure("CRM не вернул ID ученика.");
+      }
+      ensureFilial(moyklassUserId, data.getFilialId());
+      ensureJoin(moyklassUserId, data.getClassId());
+
+      String payLink = buildPayLink(moyklassUserId);
+      return MoyKlassResult.success("Заявка создана", payLink);
+    } catch (Exception e) {
+      log.warn("Failed to create site lead: {}", e.getMessage());
+      return MoyKlassResult.failure("Ошибка при создании заявки в МойКласс.");
+    }
+  }
+
+  @Override
   public MoyKlassResult getRemainingLessons(long maxUserId) {
     Long moyklassUserId = resolveMoyklassUserId(maxUserId);
     if (moyklassUserId == null) {
@@ -1011,7 +1074,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private List<String> normalizePhoneVariants(String phone) {
-    String digits = phone.replaceAll("\\\\D", "");
+    String digits = phone.replaceAll("\\D", "");
     if (digits.length() < 10 || digits.length() > 15) {
       return List.of();
     }
@@ -1103,7 +1166,23 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("userId", moyklassUserId);
     payload.put("classId", classId);
+    payload.put("statusId", config.getJoinStatusId() != null && config.getJoinStatusId() > 0
+        ? config.getJoinStatusId()
+        : 2);
     postJson("/v1/company/joins", payload);
+  }
+
+  private String buildPayLink(long moyklassUserId) throws IOException, InterruptedException {
+    JsonNode response = getJson("/v1/company/users/" + moyklassUserId + "?includePayLink=true");
+    String payLinkKey = response.path("payLinkKey").asText("");
+    if (payLinkKey.isBlank()) {
+      return null;
+    }
+    String base = config.getPayLinkBase();
+    if (base == null || base.isBlank()) {
+      base = "https://pay.tvoyklass.com/key/";
+    }
+    return base.endsWith("/") ? base + payLinkKey : base + "/" + payLinkKey;
   }
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
@@ -1208,11 +1287,24 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private String normalizePhone(String phone) {
-    String digits = phone.replaceAll("\\\\D", "");
+    String digits = phone.replaceAll("\\D", "");
     if (digits.length() < 10 || digits.length() > 15) {
       return null;
     }
     return digits;
+  }
+
+  private String trimToNull(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private String normalizeAttributeAlias(String value) {
+    String trimmed = value == null ? "" : value.trim();
+    return trimmed.startsWith("user.") ? trimmed.substring("user.".length()) : trimmed;
   }
 
   private static class AccessToken {

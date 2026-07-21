@@ -5,13 +5,19 @@ import java.util.List;
 import java.util.Map;
 
 public class KeyboardFactory {
+  private final BotProperties properties;
+
+  public KeyboardFactory(BotProperties properties) {
+    this.properties = properties;
+  }
+
   public List<Map<String, Object>> mainMenuAttachments(boolean linked) {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
     rows.add(List.of(button("callback", "📝 Записаться", "action:signup")));
     rows.add(List.of(button("callback", "🔐 Авторизоваться", "action:auth")));
     rows.add(List.of(button("callback", "🎟️ Абонементы", "action:passes")));
     rows.add(List.of(button("callback", "💳 Счет на оплату", "action:invoice")));
-    rows.add(List.of(linkButton("💬 Задать вопрос", "https://max.ru/u/f9LHodD0cOI1bQhXnFdFq9sJL6NGD_9AD2zjkNxHcHNh0Om0GOo-RQYznQE")));
+    rows.add(List.of(linkButton("💬 Задать вопрос", contactUrl())));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -75,7 +81,7 @@ public class KeyboardFactory {
 
   public List<Map<String, Object>> scheduleLinkAttachments() {
     List<List<Map<String, Object>>> rows = new ArrayList<>();
-    rows.add(List.of(linkButton("Записаться", "https://дкразвитие.рф/schedule.html")));
+    rows.add(List.of(linkButton("Записаться", registrationUrl())));
 
     return List.of(Map.of(
         "type", "inline_keyboard",
@@ -97,5 +103,15 @@ public class KeyboardFactory {
         "text", text,
         "url", url
     );
+  }
+
+  private String registrationUrl() {
+    String value = properties.getSite() == null ? null : properties.getSite().getRegistrationUrl();
+    return value == null || value.isBlank() ? "https://roboacademiya.ru/" : value;
+  }
+
+  private String contactUrl() {
+    String value = properties.getSite() == null ? null : properties.getSite().getContactUrl();
+    return value == null || value.isBlank() ? "https://max.ru/id246516134480_2_bot" : value;
   }
 }
