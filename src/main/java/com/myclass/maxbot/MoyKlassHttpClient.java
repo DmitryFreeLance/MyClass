@@ -216,15 +216,18 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   public MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId) {
     RemainingDetails details = getRemainingDetailsByMoyklassUserId(moyklassUserId);
     if (details.getItems().isEmpty()) {
-      return MoyKlassResult.success("Остаток занятий", String.valueOf(details.getTotal()));
+      return MoyKlassResult.success("Оплаченных занятий", String.valueOf(Math.max(details.getTotal(), 0)));
     }
-    StringBuilder sb = new StringBuilder("Остаток занятий:");
+    StringBuilder sb = new StringBuilder("Оплаченные занятия:");
     for (RemainingItem item : details.getItems()) {
       sb.append("\n").append(item.getCourseName());
       if (item.getClassName() != null && !item.getClassName().isBlank()) {
         sb.append(" — ").append(item.getClassName());
       }
-      sb.append(": ").append(item.getRemaining());
+      sb.append(": ").append(Math.max(item.getRemaining(), 0));
+      if (item.getRemaining() < 0) {
+        sb.append(" (есть задолженность)");
+      }
     }
     return MoyKlassResult.success(sb.toString(), null);
   }
@@ -232,11 +235,14 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   @Override
   public RemainingDetails getRemainingDetailsByMoyklassUserId(long moyklassUserId) {
     try {
+      MoyKlassUser user = getUserInfo(moyklassUserId);
+      double balance = user == null ? 0 : user.getBalance();
+      double availableBalance = user == null ? 0 : user.getAvailableBalance();
       String url = "/v1/company/userSubscriptions?userId=" + moyklassUserId + "&limit=200";
       JsonNode response = getJson(url);
       JsonNode subs = response.path("subscriptions");
       if (!subs.isArray() || subs.isEmpty()) {
-        return new RemainingDetails(List.of(), 0);
+        return new RemainingDetails(List.of(), 0, balance, availableBalance);
       }
 
       int totalRemaining = 0;
@@ -245,21 +251,10 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       Map<Long, String> courseNames = fetchCourseNames();
       Map<String, RemainingItem> byKey = new LinkedHashMap<>();
       for (JsonNode sub : subs) {
-        int visitCount = sub.path("visitCount").asInt(-1);
-        double visited = -1;
-        if (sub.has("stats")) {
-          visited = sub.path("stats").path("totalVisited").asDouble(-1);
-        }
-        if (visited < 0) {
-          visited = sub.path("visitedCount").asDouble(-1);
-        }
-        if (visitCount >= 0 && visited >= 0) {
-          int remaining = (int) Math.max(visitCount - Math.round(visited), 0);
+        Integer remaining = calculatePaidLessonRemaining(sub);
+        if (remaining != null) {
           totalRemaining += remaining;
           computed++;
-          if (remaining <= 0) {
-            continue;
-          }
           long classId = sub.path("mainClassId").asLong(0);
           ClassGroup group = classMap.get(classId);
           long courseId = resolveCourseId(sub, classMap);
@@ -285,9 +280,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       }
 
       if (computed == 0) {
-        return new RemainingDetails(List.of(), 0);
+        return new RemainingDetails(List.of(), 0, balance, availableBalance);
       }
-      return new RemainingDetails(new ArrayList<>(byKey.values()), totalRemaining);
+      return new RemainingDetails(new ArrayList<>(byKey.values()), totalRemaining, balance, availableBalance);
     } catch (Exception e) {
       log.warn("Failed to fetch subscriptions: {}", e.getMessage());
       return new RemainingDetails(List.of(), 0);
@@ -308,22 +303,10 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       Map<Long, String> courseNames = fetchCourseNames();
       List<SubscriptionRemaining> result = new ArrayList<>();
       for (JsonNode sub : subs) {
-        int visitCount = sub.path("visitCount").asInt(-1);
-        double visited = -1;
-        if (sub.has("stats")) {
-          visited = sub.path("stats").path("totalVisited").asDouble(-1);
-        }
-        if (visited < 0) {
-          visited = sub.path("visitedCount").asDouble(-1);
-        }
-        if (visitCount < 0 || visited < 0) {
+        Integer remaining = calculatePaidLessonRemaining(sub);
+        if (remaining == null) {
           continue;
         }
-        if (visitCount == 0) {
-          // Unlimited subscription - do not use for remaining warnings.
-          continue;
-        }
-        int remaining = (int) Math.round(visitCount - visited);
         long classId = sub.path("mainClassId").asLong(0);
         ClassGroup group = classMap.get(classId);
         long courseId = resolveCourseId(sub, classMap);
@@ -440,10 +423,30 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       JsonNode response = getJson("/v1/company/users/" + moyklassUserId);
       String name = response.path("name").asText(null);
       String phone = response.path("phone").asText(null);
-      return new MoyKlassUser(moyklassUserId, name, phone);
+      double balance = response.path("balans").asDouble(0);
+      double availableBalance = response.path("availableBalance").asDouble(0);
+      return new MoyKlassUser(moyklassUserId, name, phone, balance, availableBalance);
     } catch (Exception e) {
       log.warn("Failed to fetch user info: {}", e.getMessage());
       return null;
+    }
+  }
+
+  @Override
+  public List<Long> resolveLinkedMaxUserIds(long moyklassUserId) {
+    if (moyklassUserId <= 0) {
+      return List.of();
+    }
+    String alias = config.getMaxIdAttributeAlias();
+    if (alias == null || alias.isBlank()) {
+      return List.of();
+    }
+    try {
+      JsonNode response = getJson("/v1/company/users/" + moyklassUserId);
+      return extractMaxUserIdsFromAttributes(response.path("attributes"), alias.trim());
+    } catch (Exception e) {
+      log.warn("Failed to resolve MAX ids from MoyKlass user {}: {}", moyklassUserId, e.getMessage());
+      return List.of();
     }
   }
 
@@ -1109,6 +1112,70 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
     userRepository.setMoyklassUserId(maxUserId, moyklassUserId);
     return MoyKlassResult.success("Найдены данные клиента", String.valueOf(moyklassUserId));
+  }
+
+  private Integer calculatePaidLessonRemaining(JsonNode sub) {
+    if (sub == null || sub.isMissingNode()) {
+      return null;
+    }
+    int visitCount = sub.path("visitCount").asInt(-1);
+    if (visitCount <= 0) {
+      return null;
+    }
+    double unitPrice = resolveLessonUnitPrice(sub, visitCount);
+    if (unitPrice <= 0) {
+      return null;
+    }
+    double paid = sub.path("payed").asDouble(sub.path("stats").path("totalPayed").asDouble(0));
+    double billed = sub.path("stats").path("totalBilled").asDouble(0);
+    double moneyLeft = paid - billed;
+    if (moneyLeft >= 0) {
+      return (int) Math.floor(moneyLeft / unitPrice + 0.000001);
+    }
+    return -(int) Math.ceil(Math.abs(moneyLeft) / unitPrice - 0.000001);
+  }
+
+  private double resolveLessonUnitPrice(JsonNode sub, int visitCount) {
+    if (visitCount <= 0) {
+      return 0;
+    }
+    double price = sub.path("price").asDouble(0);
+    if (price <= 0) {
+      price = sub.path("originalPrice").asDouble(0);
+    }
+    if (price > 0) {
+      return price / visitCount;
+    }
+    double billed = sub.path("stats").path("totalBilled").asDouble(0);
+    double visited = sub.path("stats").path("totalVisited").asDouble(sub.path("visitedCount").asDouble(0));
+    if (billed > 0 && visited > 0) {
+      return billed / visited;
+    }
+    return 0;
+  }
+
+  private List<Long> extractMaxUserIdsFromAttributes(JsonNode attributes, String alias) {
+    if (attributes == null || !attributes.isArray() || alias == null || alias.isBlank()) {
+      return List.of();
+    }
+    List<Long> result = new ArrayList<>();
+    for (JsonNode attribute : attributes) {
+      String attributeAlias = attribute.path("attributeAlias").asText("");
+      if (!attributeAlias.equalsIgnoreCase(alias)) {
+        continue;
+      }
+      String value = attribute.path("value").asText("");
+      for (String part : value.split("[,;\\s]+")) {
+        try {
+          long maxUserId = Long.parseLong(part.trim());
+          if (maxUserId > 0 && !result.contains(maxUserId)) {
+            result.add(maxUserId);
+          }
+        } catch (NumberFormatException ignored) {
+        }
+      }
+    }
+    return result;
   }
 
   private record UserCandidate(long id, String name, JsonNode node) {}

@@ -407,7 +407,7 @@ public class MaxBotService implements ApplicationRunner {
     if (event == null || event.getUserId() <= 0) {
       return;
     }
-    List<Long> maxUserIds = userChildRepository.listMaxUserIdsByMoyklassUserId(event.getUserId());
+    List<Long> maxUserIds = resolveNotificationMaxUserIds(event.getUserId());
     if (maxUserIds.isEmpty()) {
       return;
     }
@@ -455,7 +455,7 @@ public class MaxBotService implements ApplicationRunner {
     if (event == null || event.getUserId() <= 0) {
       return;
     }
-    List<Long> maxUserIds = userChildRepository.listMaxUserIdsByMoyklassUserId(event.getUserId());
+    List<Long> maxUserIds = resolveNotificationMaxUserIds(event.getUserId());
     if (maxUserIds.isEmpty()) {
       return;
     }
@@ -565,7 +565,22 @@ public class MaxBotService implements ApplicationRunner {
     return userChildRepository.findChild(maxUserId, moyklassUserId)
         .map(UserChildRepository.UserChild::getChildName)
         .filter(name -> name != null && !name.isBlank())
-        .orElse("Ребенок " + moyklassUserId);
+        .orElseGet(() -> {
+          MoyKlassClient.MoyKlassUser user = moyKlassClient.getUserInfo(moyklassUserId);
+          if (user != null && user.getName() != null && !user.getName().isBlank()) {
+            return user.getName();
+          }
+          return "Ребенок " + moyklassUserId;
+        });
+  }
+
+  private List<Long> resolveNotificationMaxUserIds(long moyklassUserId) {
+    java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+    ids.addAll(userChildRepository.listMaxUserIdsByMoyklassUserId(moyklassUserId));
+    ids.addAll(moyKlassClient.resolveLinkedMaxUserIds(moyklassUserId));
+    return ids.stream()
+        .filter(id -> id != null && id > 0)
+        .toList();
   }
 
   private String formatProgramLabel(String comment) {
@@ -686,7 +701,7 @@ public class MaxBotService implements ApplicationRunner {
       return RemainingState.found(snapshot.getTotal(), snapshot.hasDebt());
     }
     if (remainingFallback < 0) {
-      return RemainingState.notFound();
+      return RemainingState.found(remainingFallback, true);
     }
     return RemainingState.found(remainingFallback, remainingFallback < 0);
   }
@@ -1895,19 +1910,35 @@ public class MaxBotService implements ApplicationRunner {
       return "Не удалось получить данные.";
     }
     List<MoyKlassClient.RemainingItem> items = details.getItems();
+    String balanceLine = "💰 Баланс: " + formatMoney(details.getBalance()) + " руб.";
     if (items == null || items.isEmpty()) {
-      return "Остаток занятий: " + details.getTotal();
+      return balanceLine + "\n📚 Оплаченных занятий: " + Math.max(details.getTotal(), 0);
     }
-    StringBuilder sb = new StringBuilder("📚 Остаток занятий:");
+    StringBuilder sb = new StringBuilder(balanceLine).append("\n📚 Оплаченные занятия:");
     for (MoyKlassClient.RemainingItem item : items) {
       String course = item.getCourseName() == null ? "Прочее" : item.getCourseName();
       String className = item.getClassName();
       String label = className == null || className.isBlank()
           ? course
           : course + " — " + className;
-      sb.append("\n").append(emojiForCourse(course)).append(" ").append(label).append(": ").append(item.getRemaining());
+      sb.append("\n").append(emojiForCourse(course)).append(" ").append(label).append(": ")
+          .append(formatPaidLessonsRemaining(item.getRemaining()));
     }
     return sb.toString();
+  }
+
+  private String formatPaidLessonsRemaining(int remaining) {
+    if (remaining < 0) {
+      return "0 (есть задолженность)";
+    }
+    return String.valueOf(remaining);
+  }
+
+  private String formatMoney(double amount) {
+    if (Math.abs(amount - Math.rint(amount)) < 0.01) {
+      return String.valueOf((long) Math.rint(amount));
+    }
+    return String.format(Locale.US, "%.2f", amount).replace('.', ',');
   }
 
   private String emojiForCourse(String course) {

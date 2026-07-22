@@ -43,6 +43,12 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
   }
 
   @Override
+  public java.util.List<Long> resolveLinkedMaxUserIds(long moyklassUserId) {
+    log.warn("MoyKlass integration disabled; resolveLinkedMaxUserIds skipped");
+    return java.util.List.of();
+  }
+
+  @Override
   public MoyKlassResult getRemainingLessons(long maxUserId) {
     log.warn("MoyKlass integration disabled; getRemainingLessons skipped for user {}", maxUserId);
     return MoyKlassResult.failure("Интеграция с МойКласс пока не настроена.");

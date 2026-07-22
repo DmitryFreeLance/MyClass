@@ -13,6 +13,8 @@ public interface MoyKlassClient {
 
   MoyKlassUser getUserInfo(long moyklassUserId);
 
+  java.util.List<Long> resolveLinkedMaxUserIds(long moyklassUserId);
+
   MoyKlassResult getRemainingLessons(long maxUserId);
 
   MoyKlassResult getRemainingLessonsByMoyklassUserId(long moyklassUserId);
@@ -207,11 +209,19 @@ public interface MoyKlassClient {
     private final long id;
     private final String name;
     private final String phone;
+    private final double balance;
+    private final double availableBalance;
 
     public MoyKlassUser(long id, String name, String phone) {
+      this(id, name, phone, 0, 0);
+    }
+
+    public MoyKlassUser(long id, String name, String phone, double balance, double availableBalance) {
       this.id = id;
       this.name = name;
       this.phone = phone;
+      this.balance = balance;
+      this.availableBalance = availableBalance;
     }
 
     public long getId() {
@@ -225,15 +235,31 @@ public interface MoyKlassClient {
     public String getPhone() {
       return phone;
     }
+
+    public double getBalance() {
+      return balance;
+    }
+
+    public double getAvailableBalance() {
+      return availableBalance;
+    }
   }
 
   class RemainingDetails {
     private final java.util.List<RemainingItem> items;
     private final int total;
+    private final double balance;
+    private final double availableBalance;
 
     public RemainingDetails(java.util.List<RemainingItem> items, int total) {
+      this(items, total, 0, 0);
+    }
+
+    public RemainingDetails(java.util.List<RemainingItem> items, int total, double balance, double availableBalance) {
       this.items = items;
       this.total = total;
+      this.balance = balance;
+      this.availableBalance = availableBalance;
     }
 
     public java.util.List<RemainingItem> getItems() {
@@ -242,6 +268,14 @@ public interface MoyKlassClient {
 
     public int getTotal() {
       return total;
+    }
+
+    public double getBalance() {
+      return balance;
+    }
+
+    public double getAvailableBalance() {
+      return availableBalance;
     }
   }
 
