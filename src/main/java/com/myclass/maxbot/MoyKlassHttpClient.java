@@ -251,6 +251,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       Map<Long, String> courseNames = fetchCourseNames();
       Map<String, RemainingItem> byKey = new LinkedHashMap<>();
       for (JsonNode sub : subs) {
+        if (!isCountableSubscription(sub)) {
+          continue;
+        }
         Integer remaining = calculatePaidLessonRemaining(sub);
         if (remaining != null) {
           totalRemaining += remaining;
@@ -303,6 +306,9 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       Map<Long, String> courseNames = fetchCourseNames();
       List<SubscriptionRemaining> result = new ArrayList<>();
       for (JsonNode sub : subs) {
+        if (!isCountableSubscription(sub)) {
+          continue;
+        }
         Integer remaining = calculatePaidLessonRemaining(sub);
         if (remaining == null) {
           continue;
@@ -1133,6 +1139,28 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return (int) Math.floor(moneyLeft / unitPrice + 0.000001);
     }
     return -(int) Math.ceil(Math.abs(moneyLeft) / unitPrice - 0.000001);
+  }
+
+  private boolean isCountableSubscription(JsonNode sub) {
+    if (sub == null || sub.isMissingNode()) {
+      return false;
+    }
+    int statusId = sub.path("statusId").asInt(0);
+    if (statusId == 4) {
+      return false;
+    }
+    String overDate = sub.path("overDate").asText("");
+    if (overDate == null || overDate.isBlank()) {
+      return true;
+    }
+    if (!sub.path("burnLeftovers").asBoolean(false)) {
+      return true;
+    }
+    try {
+      return !java.time.LocalDate.parse(overDate).isBefore(java.time.LocalDate.now());
+    } catch (Exception ignored) {
+      return true;
+    }
   }
 
   private double resolveLessonUnitPrice(JsonNode sub, int visitCount) {
