@@ -764,6 +764,28 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
   }
 
+  private Map<Long, String> fetchSubscriptionNames() {
+    try {
+      JsonNode response = getJson("/v1/company/subscriptions?limit=500");
+      JsonNode items = response.path("subscriptions");
+      if (items == null || !items.isArray()) {
+        return Map.of();
+      }
+      Map<Long, String> map = new LinkedHashMap<>();
+      for (JsonNode node : items) {
+        long id = node.path("id").asLong(0);
+        String name = node.path("name").asText("");
+        if (id > 0 && name != null && !name.isBlank()) {
+          map.put(id, name);
+        }
+      }
+      return map;
+    } catch (Exception e) {
+      log.warn("Failed to fetch subscription names: {}", e.getMessage());
+      return Map.of();
+    }
+  }
+
   private long resolveCourseId(JsonNode sub, Map<Long, ClassGroup> classMap) {
     if (sub == null) {
       return 0;
@@ -934,6 +956,63 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     } catch (Exception e) {
       log.warn("Failed to list payments by user {}: {}", moyklassUserId, e.getMessage());
       return List.of();
+    }
+    java.util.Collections.reverse(result);
+    return result;
+  }
+
+  @Override
+  public List<SubscriptionEvent> listUserSubscriptionEvents(long sinceId) {
+    if (config.getToken() == null || config.getToken().isBlank()) {
+      return List.of();
+    }
+    List<SubscriptionEvent> result = new ArrayList<>();
+    Map<Long, String> subscriptionNames = fetchSubscriptionNames();
+    int limit = 200;
+    int offset = 0;
+    boolean bootstrap = sinceId <= 0;
+    boolean done = false;
+    while (!done) {
+      try {
+        String url = "/v1/company/userSubscriptions?sort=id&sortDirection=desc"
+            + "&limit=" + limit + "&offset=" + offset;
+        JsonNode response = getJson(url);
+        JsonNode items = response.path("subscriptions");
+        if (items == null || !items.isArray() || items.isEmpty()) {
+          break;
+        }
+        for (JsonNode node : items) {
+          long id = node.path("id").asLong(0);
+          if (id <= sinceId) {
+            done = true;
+            break;
+          }
+          if (!isCountableSubscription(node)) {
+            continue;
+          }
+          long userId = node.path("userId").asLong(0);
+          long subscriptionId = node.path("subscriptionId").asLong(0);
+          int visitCount = node.path("visitCount").asInt(0);
+          double price = node.path("price").asDouble(0);
+          double payed = node.path("payed").asDouble(node.path("stats").path("totalPayed").asDouble(0));
+          Integer calculatedRemaining = calculatePaidLessonRemaining(node);
+          int remaining = calculatedRemaining == null ? 0 : calculatedRemaining;
+          String name = subscriptionNames.getOrDefault(subscriptionId, "Абонемент");
+          if (id > 0 && userId > 0) {
+            result.add(new SubscriptionEvent(id, userId, subscriptionId, name, visitCount, price, payed, remaining));
+          }
+        }
+        if (items.size() < limit) {
+          break;
+        }
+        if (bootstrap) {
+          break;
+        }
+        offset += limit;
+      } catch (Exception e) {
+        log.warn("Failed to list user subscriptions: {}", e.getMessage());
+        break;
+      }
     }
     java.util.Collections.reverse(result);
     return result;
