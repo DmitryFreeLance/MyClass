@@ -42,15 +42,13 @@ public class MaxBotService implements ApplicationRunner {
   private static final String STATE_LESSONS_BOOT_ID = "notify.lessons.bootId";
   private static final String STATE_LAST_PAYMENT = "notify.lastPaymentId";
   private static final String STATE_PAYMENTS_BOOT_ID = "notify.payments.bootId";
-  private static final String STATE_LAST_SUBSCRIPTION = "notify.lastSubscriptionId";
   private static final long MARKER_RESET_AFTER_MS = 3 * 60 * 1000L;
   private static final long MARKER_RESET_COOLDOWN_MS = 10 * 60 * 1000L;
   private static final long LONG_POLL_ERROR_DELAY_MS = 2_000L;
   private static final long LONG_POLL_429_BASE_DELAY_MS = 30_000L;
   private static final long LONG_POLL_429_MAX_DELAY_MS = 120_000L;
-  private static final long NOTIFY_LESSONS_INTERVAL_SEC = 60;
-  private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 30;
-  private static final long NOTIFY_SUBSCRIPTIONS_INTERVAL_SEC = 30;
+  private static final long NOTIFY_LESSONS_INTERVAL_SEC = 120;
+  private static final long NOTIFY_PAYMENTS_INTERVAL_SEC = 120;
   private static final long REFERENCE_CACHE_TTL_MS = 60 * 1000L;
 
   private final BotProperties properties;
@@ -121,10 +119,8 @@ public class MaxBotService implements ApplicationRunner {
         && !properties.getMoyklass().getToken().isBlank()) {
       scheduler.scheduleAtFixedRate(this::pollLessonNotifications, 10,
           NOTIFY_LESSONS_INTERVAL_SEC, TimeUnit.SECONDS);
-      scheduler.scheduleAtFixedRate(this::pollPaymentNotifications, 10,
+      scheduler.scheduleAtFixedRate(this::pollPaymentNotifications, 40,
           NOTIFY_PAYMENTS_INTERVAL_SEC, TimeUnit.SECONDS);
-      scheduler.scheduleAtFixedRate(this::pollSubscriptionNotifications, 10,
-          NOTIFY_SUBSCRIPTIONS_INTERVAL_SEC, TimeUnit.SECONDS);
     }
   }
 
@@ -236,11 +232,6 @@ public class MaxBotService implements ApplicationRunner {
     } catch (Exception e) {
       log.warn("Failed to poll payment notifications: {}", e.getMessage());
     }
-    try {
-      pollSubscriptionNotifications();
-    } catch (Exception e) {
-      log.warn("Failed to poll subscription notifications: {}", e.getMessage());
-    }
   }
 
   private void pollLessonNotifications() {
@@ -333,59 +324,7 @@ public class MaxBotService implements ApplicationRunner {
     }
   }
 
-  private void pollSubscriptionNotifications() {
-    Optional<String> storedLastId = botStateRepository.get(STATE_LAST_SUBSCRIPTION);
-    if (storedLastId.isEmpty()) {
-      long maxId = 0L;
-      for (MoyKlassClient.SubscriptionEvent event : moyKlassClient.listUserSubscriptionEvents(0)) {
-        if (event.getId() > maxId) {
-          maxId = event.getId();
-        }
-      }
-      if (maxId > 0) {
-        botStateRepository.set(STATE_LAST_SUBSCRIPTION, String.valueOf(maxId));
-      }
-      return;
-    }
-
-    long lastId = parseLongSafe(storedLastId.get());
-    List<MoyKlassClient.SubscriptionEvent> events = moyKlassClient.listUserSubscriptionEvents(lastId);
-    if (events.isEmpty()) {
-      return;
-    }
-    long maxId = lastId;
-    for (MoyKlassClient.SubscriptionEvent event : events) {
-      if (event.getId() > maxId) {
-        maxId = event.getId();
-      }
-      sendSubscriptionNotification(event);
-    }
-    if (maxId > lastId) {
-      botStateRepository.set(STATE_LAST_SUBSCRIPTION, String.valueOf(maxId));
-    }
-  }
-
   private List<MoyKlassClient.PaymentEvent> collectRecentPaymentEvents(long lastId) {
-    List<Long> linkedIds = userChildRepository.listDistinctMoyklassUserIds();
-    if (!linkedIds.isEmpty() && linkedIds.size() <= 200) {
-      Map<Long, MoyKlassClient.PaymentEvent> merged = new java.util.LinkedHashMap<>();
-      for (Long moyklassUserId : linkedIds) {
-        if (moyklassUserId == null || moyklassUserId <= 0) {
-          continue;
-        }
-        long userBaseline = getPaymentBaselineForUser(moyklassUserId, lastId);
-        for (MoyKlassClient.PaymentEvent event : moyKlassClient
-            .listIncomingPaymentsByUser(moyklassUserId, userBaseline)) {
-          if (event.getId() > 0) {
-            merged.putIfAbsent(event.getId(), event);
-          }
-        }
-      }
-      java.util.List<MoyKlassClient.PaymentEvent> result = new java.util.ArrayList<>(merged.values());
-      result.sort(java.util.Comparator.comparingLong(MoyKlassClient.PaymentEvent::getId));
-      return result;
-    }
-
     List<MoyKlassClient.PaymentEvent> events = moyKlassClient.listIncomingPayments(lastId);
     if (events.isEmpty()) {
       return events;
@@ -510,40 +449,6 @@ public class MaxBotService implements ApplicationRunner {
         sendUserMessage(maxUserId, message);
       }
     }
-  }
-
-  private void sendSubscriptionNotification(MoyKlassClient.SubscriptionEvent event) {
-    if (event == null || event.getUserId() <= 0) {
-      return;
-    }
-    List<Long> maxUserIds = resolveNotificationMaxUserIds(event.getUserId());
-    if (maxUserIds.isEmpty()) {
-      return;
-    }
-    for (Long maxUserId : maxUserIds) {
-      if (maxUserId != null && maxUserId > 0) {
-        String childName = resolveChildName(maxUserId, event.getUserId());
-        sendUserMessage(maxUserId, buildSubscriptionNotification(childName, event));
-      }
-    }
-  }
-
-  private String buildSubscriptionNotification(String childName, MoyKlassClient.SubscriptionEvent event) {
-    String name = event.getName() == null || event.getName().isBlank()
-        ? "Абонемент"
-        : event.getName();
-    StringBuilder message = new StringBuilder("Здравствуйте!\n\n");
-    message.append("Для ребенка ").append(childName).append(" оформлен абонемент:\n");
-    message.append(name).append("\n\n");
-    if (event.getVisitCount() > 0) {
-      message.append("Занятий: ").append(event.getVisitCount()).append("\n");
-    }
-    if (event.getPrice() > 0) {
-      message.append("Стоимость: ").append(formatMoney(event.getPrice())).append(" руб.\n");
-    }
-    message.append("Оплачено: ").append(formatMoney(event.getPayed())).append(" руб.\n");
-    message.append("Оплаченных занятий: ").append(formatPaidLessonsRemaining(event.getRemaining()));
-    return message.toString();
   }
 
   private Map<Long, MoyKlassClient.ClassGroup> getClassMap() {
@@ -1985,7 +1890,9 @@ public class MaxBotService implements ApplicationRunner {
       return "Не удалось получить данные.";
     }
     List<MoyKlassClient.RemainingItem> items = details.getItems();
-    String balanceLine = "💰 Баланс: " + formatMoney(details.getBalance()) + " руб.";
+    String balanceLine = details.isBalanceKnown()
+        ? "💰 Баланс: " + formatMoney(details.getBalance()) + " руб."
+        : "💰 Баланс: временно недоступен";
     if (items == null || items.isEmpty()) {
       return balanceLine + "\n📚 Оплаченных занятий: " + Math.max(details.getTotal(), 0);
     }

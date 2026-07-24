@@ -132,9 +132,4 @@ public class MoyKlassDisabledClient implements MoyKlassClient {
     return java.util.List.of();
   }
 
-  @Override
-  public java.util.List<SubscriptionEvent> listUserSubscriptionEvents(long sinceId) {
-    log.warn("MoyKlass integration disabled; listUserSubscriptionEvents skipped");
-    return java.util.List.of();
-  }
 }

@@ -236,13 +236,14 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   public RemainingDetails getRemainingDetailsByMoyklassUserId(long moyklassUserId) {
     try {
       MoyKlassUser user = getUserInfo(moyklassUserId);
+      boolean balanceKnown = user != null;
       double balance = user == null ? 0 : user.getBalance();
       double availableBalance = user == null ? 0 : user.getAvailableBalance();
       String url = "/v1/company/userSubscriptions?userId=" + moyklassUserId + "&limit=200";
       JsonNode response = getJson(url);
       JsonNode subs = response.path("subscriptions");
       if (!subs.isArray() || subs.isEmpty()) {
-        return new RemainingDetails(List.of(), 0, balance, availableBalance);
+        return new RemainingDetails(List.of(), 0, balance, availableBalance, balanceKnown);
       }
 
       int totalRemaining = 0;
@@ -283,9 +284,10 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       }
 
       if (computed == 0) {
-        return new RemainingDetails(List.of(), 0, balance, availableBalance);
+        return new RemainingDetails(List.of(), 0, balance, availableBalance, balanceKnown);
       }
-      return new RemainingDetails(new ArrayList<>(byKey.values()), totalRemaining, balance, availableBalance);
+      return new RemainingDetails(
+          new ArrayList<>(byKey.values()), totalRemaining, balance, availableBalance, balanceKnown);
     } catch (Exception e) {
       log.warn("Failed to fetch subscriptions: {}", e.getMessage());
       return new RemainingDetails(List.of(), 0);
@@ -426,7 +428,7 @@ public class MoyKlassHttpClient implements MoyKlassClient {
       return null;
     }
     try {
-      JsonNode response = getJson("/v1/company/users/" + moyklassUserId);
+      JsonNode response = getJsonWithRetries("/v1/company/users/" + moyklassUserId, 2);
       String name = response.path("name").asText(null);
       String phone = response.path("phone").asText(null);
       double balance = response.path("balans").asDouble(0);
@@ -485,7 +487,8 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   @Override
   public MoyKlassResult createInvoiceByMoyklassUserId(long moyklassUserId) {
     try {
-      JsonNode response = getJson("/v1/company/users/" + moyklassUserId + "?includePayLink=true");
+      JsonNode response = getJsonWithRetries(
+          "/v1/company/users/" + moyklassUserId + "?includePayLink=true", 3);
       String payLinkKey = response.path("payLinkKey").asText("");
       if (payLinkKey.isBlank()) {
         return MoyKlassResult.failure("CRM не вернул ссылку на оплату.");
@@ -764,28 +767,6 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     }
   }
 
-  private Map<Long, String> fetchSubscriptionNames() {
-    try {
-      JsonNode response = getJson("/v1/company/subscriptions?limit=500");
-      JsonNode items = response.path("subscriptions");
-      if (items == null || !items.isArray()) {
-        return Map.of();
-      }
-      Map<Long, String> map = new LinkedHashMap<>();
-      for (JsonNode node : items) {
-        long id = node.path("id").asLong(0);
-        String name = node.path("name").asText("");
-        if (id > 0 && name != null && !name.isBlank()) {
-          map.put(id, name);
-        }
-      }
-      return map;
-    } catch (Exception e) {
-      log.warn("Failed to fetch subscription names: {}", e.getMessage());
-      return Map.of();
-    }
-  }
-
   private long resolveCourseId(JsonNode sub, Map<Long, ClassGroup> classMap) {
     if (sub == null) {
       return 0;
@@ -956,63 +937,6 @@ public class MoyKlassHttpClient implements MoyKlassClient {
     } catch (Exception e) {
       log.warn("Failed to list payments by user {}: {}", moyklassUserId, e.getMessage());
       return List.of();
-    }
-    java.util.Collections.reverse(result);
-    return result;
-  }
-
-  @Override
-  public List<SubscriptionEvent> listUserSubscriptionEvents(long sinceId) {
-    if (config.getToken() == null || config.getToken().isBlank()) {
-      return List.of();
-    }
-    List<SubscriptionEvent> result = new ArrayList<>();
-    Map<Long, String> subscriptionNames = fetchSubscriptionNames();
-    int limit = 200;
-    int offset = 0;
-    boolean bootstrap = sinceId <= 0;
-    boolean done = false;
-    while (!done) {
-      try {
-        String url = "/v1/company/userSubscriptions?sort=id&sortDirection=desc"
-            + "&limit=" + limit + "&offset=" + offset;
-        JsonNode response = getJson(url);
-        JsonNode items = response.path("subscriptions");
-        if (items == null || !items.isArray() || items.isEmpty()) {
-          break;
-        }
-        for (JsonNode node : items) {
-          long id = node.path("id").asLong(0);
-          if (id <= sinceId) {
-            done = true;
-            break;
-          }
-          if (!isCountableSubscription(node)) {
-            continue;
-          }
-          long userId = node.path("userId").asLong(0);
-          long subscriptionId = node.path("subscriptionId").asLong(0);
-          int visitCount = node.path("visitCount").asInt(0);
-          double price = node.path("price").asDouble(0);
-          double payed = node.path("payed").asDouble(node.path("stats").path("totalPayed").asDouble(0));
-          Integer calculatedRemaining = calculatePaidLessonRemaining(node);
-          int remaining = calculatedRemaining == null ? 0 : calculatedRemaining;
-          String name = subscriptionNames.getOrDefault(subscriptionId, "Абонемент");
-          if (id > 0 && userId > 0) {
-            result.add(new SubscriptionEvent(id, userId, subscriptionId, name, visitCount, price, payed, remaining));
-          }
-        }
-        if (items.size() < limit) {
-          break;
-        }
-        if (bootstrap) {
-          break;
-        }
-        offset += limit;
-      } catch (Exception e) {
-        log.warn("Failed to list user subscriptions: {}", e.getMessage());
-        break;
-      }
     }
     java.util.Collections.reverse(result);
     return result;
@@ -1347,7 +1271,8 @@ public class MoyKlassHttpClient implements MoyKlassClient {
   }
 
   private String buildPayLink(long moyklassUserId) throws IOException, InterruptedException {
-    JsonNode response = getJson("/v1/company/users/" + moyklassUserId + "?includePayLink=true");
+    JsonNode response = getJsonWithRetries(
+        "/v1/company/users/" + moyklassUserId + "?includePayLink=true", 3);
     String payLinkKey = response.path("payLinkKey").asText("");
     if (payLinkKey.isBlank()) {
       return null;
@@ -1361,6 +1286,31 @@ public class MoyKlassHttpClient implements MoyKlassClient {
 
   private JsonNode getJson(String path) throws IOException, InterruptedException {
     return sendRequest("GET", path, null);
+  }
+
+  private JsonNode getJsonWithRetries(String path, int attempts) throws IOException, InterruptedException {
+    IOException last = null;
+    int maxAttempts = Math.max(1, attempts);
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return getJson(path);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw e;
+      } catch (IOException e) {
+        last = e;
+        if (attempt >= maxAttempts) {
+          throw e;
+        }
+        try {
+          Thread.sleep(400L * attempt);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw interrupted;
+        }
+      }
+    }
+    throw last == null ? new IOException("MoyKlass request failed") : last;
   }
 
   private JsonNode postJson(String path, Object body) throws IOException, InterruptedException {

@@ -43,8 +43,6 @@ public interface MoyKlassClient {
 
   java.util.List<PaymentEvent> listIncomingPaymentsByUser(long moyklassUserId, long sinceId);
 
-  java.util.List<SubscriptionEvent> listUserSubscriptionEvents(long sinceId);
-
   class Filial {
     private final long id;
     private final String name;
@@ -252,16 +250,23 @@ public interface MoyKlassClient {
     private final int total;
     private final double balance;
     private final double availableBalance;
+    private final boolean balanceKnown;
 
     public RemainingDetails(java.util.List<RemainingItem> items, int total) {
-      this(items, total, 0, 0);
+      this(items, total, 0, 0, false);
     }
 
     public RemainingDetails(java.util.List<RemainingItem> items, int total, double balance, double availableBalance) {
+      this(items, total, balance, availableBalance, true);
+    }
+
+    public RemainingDetails(java.util.List<RemainingItem> items, int total, double balance,
+        double availableBalance, boolean balanceKnown) {
       this.items = items;
       this.total = total;
       this.balance = balance;
       this.availableBalance = availableBalance;
+      this.balanceKnown = balanceKnown;
     }
 
     public java.util.List<RemainingItem> getItems() {
@@ -278,6 +283,10 @@ public interface MoyKlassClient {
 
     public double getAvailableBalance() {
       return availableBalance;
+    }
+
+    public boolean isBalanceKnown() {
+      return balanceKnown;
     }
   }
 
@@ -375,61 +384,6 @@ public interface MoyKlassClient {
 
     public boolean isPaid() {
       return paid;
-    }
-  }
-
-  class SubscriptionEvent {
-    private final long id;
-    private final long userId;
-    private final long subscriptionId;
-    private final String name;
-    private final int visitCount;
-    private final double price;
-    private final double payed;
-    private final int remaining;
-
-    public SubscriptionEvent(long id, long userId, long subscriptionId, String name, int visitCount,
-                             double price, double payed, int remaining) {
-      this.id = id;
-      this.userId = userId;
-      this.subscriptionId = subscriptionId;
-      this.name = name;
-      this.visitCount = visitCount;
-      this.price = price;
-      this.payed = payed;
-      this.remaining = remaining;
-    }
-
-    public long getId() {
-      return id;
-    }
-
-    public long getUserId() {
-      return userId;
-    }
-
-    public long getSubscriptionId() {
-      return subscriptionId;
-    }
-
-    public String getName() {
-      return name;
-    }
-
-    public int getVisitCount() {
-      return visitCount;
-    }
-
-    public double getPrice() {
-      return price;
-    }
-
-    public double getPayed() {
-      return payed;
-    }
-
-    public int getRemaining() {
-      return remaining;
     }
   }
 
