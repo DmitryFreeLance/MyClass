@@ -1890,13 +1890,10 @@ public class MaxBotService implements ApplicationRunner {
       return "Не удалось получить данные.";
     }
     List<MoyKlassClient.RemainingItem> items = details.getItems();
-    String balanceLine = details.isBalanceKnown()
-        ? "💰 Баланс: " + formatMoney(details.getBalance()) + " руб."
-        : "💰 Баланс: временно недоступен";
     if (items == null || items.isEmpty()) {
-      return balanceLine + "\n📚 Оплаченных занятий: " + Math.max(details.getTotal(), 0);
+      return "📚 Оплаченные занятия: " + Math.max(details.getTotal(), 0);
     }
-    StringBuilder sb = new StringBuilder(balanceLine).append("\n📚 Оплаченные занятия:");
+    StringBuilder sb = new StringBuilder("📚 Оплаченные занятия:");
     for (MoyKlassClient.RemainingItem item : items) {
       String course = item.getCourseName() == null ? "Прочее" : item.getCourseName();
       String className = item.getClassName();
