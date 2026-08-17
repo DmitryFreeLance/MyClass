@@ -1119,7 +1119,7 @@ public class MaxBotService implements ApplicationRunner {
 
   private void sendScheduleMessage(long userId) {
     String text = getText(TEXT_SIGNUP_REDIRECT,
-        "Для записи на занятия по английскому языку/творчеству перейдите по ссылке\n(кнопка «Записаться»)");
+        "Для записи на занятия по робототехнике перейдите по ссылке\n(кнопка «Записаться»)");
     try {
       maxApiClient.sendMessageToUser(userId, Map.of(
           "text", text,
